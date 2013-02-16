@@ -68,12 +68,32 @@ template LDrn(cpu: PCPU, register: expr) {.immediate.} =
   inc(cpu.r.pc)
   cpu.r.clock.m = 2
 
+template PUSHqq(cpu: PCPU, r1, r2: expr) {.immediate.} =
+  cpu.r.sp.dec
+  cpu.mem.writeByte(cpu.r.sp, cpu.r.r1)
+  cpu.r.sp.dec
+  cpu.mem.writeByte(cpu.r.sp, cpu.r.r2)
+  cpu.r.clock.m = 3
+
 proc exec(cpu: PCPU) =
   ## Executes the next instruction
   let opcode = cpu.mem.readByte(cpu.r.pc)
   #echo("OPCODE: 0x", toHex(opcode, 2))
   cpu.r.pc.inc()
   case opcode
+  of 0x06:
+    # LD B, n
+    # Load 8-bit immediate into B
+    LDrn(cpu, b)
+  of 0x0E:
+    # LD C, n
+    # Load 8-bit immediate into C.
+    LDrn(cpu, c)  
+  of 0x3E:
+    # LD A, n
+    # Load 8-bit immediate into A.
+    LDrn(cpu, a)
+
   of 0x0C:
     # INC c
     # Increment C
@@ -81,14 +101,20 @@ proc exec(cpu: PCPU) =
     cpu.r.clock.m = 1
     cpu.changeFlags(Z = >>(cpu.r.c == 0), H = >>((cpu.r.c and 0xF) == 0),
                     N = FUnset)
-  of 0x0E:
-    # LD C, n
-    # Load 8-bit immediate into C.
-    LDrn(cpu, c)
-  of 0x3E:
-    # LD A, n
-    # Load 8-bit immediate into A.
-    LDrn(cpu, a)
+
+  of 0x11:
+    # LD DE, nn
+    # Load 16-bit immediate into DE
+    cpu.r.e = cpu.mem.readByte(cpu.r.pc)
+    cpu.r.d = cpu.mem.readByte(cpu.r.pc+1)
+    cpu.r.pc.inc(2)
+    cpu.r.clock.m = 3
+  
+  of 0x1A:
+    # LD A, (DE)
+    # Load A from address pointed to by DE
+    cpu.r.a = cpu.mem.readByte((cpu.r.d shl 8) or cpu.r.e)
+    cpu.r.clock.m = 2
     
   of 0x20:
     # JR NZ, n
@@ -121,6 +147,19 @@ proc exec(cpu: PCPU) =
     cpu.r.L = low; cpu.r.H = hi
     cpu.r.clock.m = 2
   
+  of 0x4F:
+    # LD C, A
+    # Copy A into C.
+    cpu.r.a = cpu.r.c
+    cpu.r.clock.m = 1
+  
+  of 0x77:
+    # LD (HL), A
+    # Copy A to address pointed by HL
+    let HL = ((cpu.r.h shl 8) or cpu.r.L)
+    cpu.mem.writeByte(HL, cpu.r.a)
+    cpu.r.clock.m = 2
+  
   of 0xAF:
     # XOR A
     # Logical XOR against (register) A
@@ -128,11 +167,30 @@ proc exec(cpu: PCPU) =
     cpu.changeFlags(Z = >>(cpu.r.a == 0), H = FUnset, C = FUnset)
     cpu.r.clock.m = 1
   
+  of 0xC5:
+    # PUSH BC
+    # Push 16-bit BC onto stack.
+    PUSHqq(cpu, b, c)
+  of 0xD5:
+    # PUSH DE
+    PUSHqq(cpu, d, e)
+  of 0xE5:
+    # PUSH HL
+    PUSHqq(cpu, H, L)
+  of 0xF5:
+    # PUSH AF
+    PUSHqq(cpu, a, f)
+  
   of 0xCB:
     # Extended Ops
     let extop = cpu.mem.readByte(cpu.r.pc)
     cpu.r.pc.inc
     case extop
+    of 0x11:
+      # RL C
+      # Rotate C left.
+      assert false
+      
     of 0x7C:
       # BIT 7, H
       # Test whether bit 7 of H is zero
@@ -141,6 +199,22 @@ proc exec(cpu: PCPU) =
     else:
       echo "Unknown extended op: 0x", extop.toHex(2)
       assert false
+  
+  of 0xCD:
+    # CALL nn
+    # Call routine at 16-bit location
+    cpu.r.sp.dec(2)
+    
+    # We pushing pc+2 onto the stack because the next two bits are used. Below next line.
+    cpu.mem.writeWord(cpu.r.sp, cpu.r.pc+2)
+    cpu.r.pc = cpu.mem.readWord(cpu.r.pc)
+    cpu.r.clock.m = 5
+  of 0xE0:
+    # LDH (0xFF00 + n), A
+    # Save A at address pointed to by (0xFF00 + 8-bit immediate).
+    cpu.mem.writeByte(0xFF00 + cpu.mem.readByte(cpu.r.pc), cpu.r.a)
+    cpu.r.pc.inc
+    cpu.r.clock.m = 3
   
   of 0xE2:
     # LDH (0xFF00 + C), A

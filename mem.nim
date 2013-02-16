@@ -12,6 +12,7 @@ type
     bios: array[0 .. 255, int32]    # 255 Bytes
     extRAM: array[0 .. 8191, int32] # 8KB
     workRAM: array[0 .. 8191, int32] # 8KB
+    zeroRAM: array[0 .. 127, int32]
     gpu*: PGPU
     
 proc hexdump(s: string) =
@@ -91,6 +92,7 @@ proc readByte*(mem: PMem, address: int32): int32 =
   case (address and 0xF000)
   of 0x0000:
     # BIOS
+    if address > mem.bios.high: return 0 # TODO: Correct?
     return mem.bios[address]
   of 0x1000, 0x2000, 0x3000:
     return mem.rom[address.int].ord
@@ -103,7 +105,7 @@ proc readByte*(mem: PMem, address: int32): int32 =
     assert false
 
 proc readWord*(mem: PMem, address: int32): int32 =
-  return readByte(mem, address) shl 8 or readByte(mem, address+1)
+  return readByte(mem, address) or (readByte(mem, address+1) shl 8) 
 
 proc writeByte*(mem: PMem, address: int32, b: int32) =
   case (address and 0xF000)
@@ -116,6 +118,11 @@ proc writeByte*(mem: PMem, address: int32, b: int32) =
   of 0xF000:
     case address and 0x0F00
     of 0x0F00:
+      if address > 0xFF7F:
+        echo("ZeroRam. Address: ", toHex(address, 4), " Value: ", toHex(b, 4))
+        mem.zeroRAM[address and 0x007F] = b
+        return 
+    
       case address
       of 0xFF11:
         # TODO:
@@ -123,6 +130,9 @@ proc writeByte*(mem: PMem, address: int32, b: int32) =
       of 0xFF26:
         # TODO:
         echo("Sound on/off (0xFF26): ", b.toHex(4))
+      of 0xFF47:
+        # TODO:
+        echo("BG Palette (0xFF47): ", b.toHex(4))
       else:
         echo("Interrupts. Address: 0x", toHex(Address, 4), " Value: ", toHex(b, 4))
     else:
