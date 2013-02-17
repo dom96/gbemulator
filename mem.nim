@@ -101,7 +101,17 @@ proc readByte*(mem: PMem, address: int32): int32 =
   of 0x8000, 0x9000:
     # VRAM
     return mem.GPU.vram[address and 0x1FFF]
+  of 0xF000:
+    case address and 0x0F00
+    of 0x0F00:
+      if address > 0xFF7F:
+        return mem.zeroRAM[address and 0x007F]
+      
+      assert false
+    else:
+      assert false
   else:
+    echo("Read ", address.toHex(4))
     assert false
 
 proc readWord*(mem: PMem, address: int32): int32 =

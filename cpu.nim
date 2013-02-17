@@ -63,6 +63,12 @@ proc `>>`(b: bool): TFlagState =
   if b: return FSet
   else: return FUnset
 
+proc `/<</`(v: int32, interval: int): int32 =
+  ## Circular shift 8-bit value left ``interval`` times.
+  let leftMost = v shr (8-interval)
+  result = ((v shl interval) or leftMost).int32
+  result = result and 0xFF
+
 template LDrn(cpu: PCPU, register: expr) {.immediate.} =
   cpu.r.register = cpu.mem.readByte(cpu.r.pc)
   inc(cpu.r.pc)
@@ -74,6 +80,32 @@ template PUSHqq(cpu: PCPU, r1, r2: expr) {.immediate.} =
   cpu.r.sp.dec
   cpu.mem.writeByte(cpu.r.sp, cpu.r.r2)
   cpu.r.clock.m = 3
+
+template POPqq(cpu: PCPU, r1, r2: expr) {.immediate.} =
+  ## r1 = High, r2 = Low
+  cpu.r.r2 = cpu.mem.readByte(cpu.r.sp)
+  cpu.r.sp.inc
+  cpu.r.r1 = cpu.mem.readByte(cpu.r.sp)
+  cpu.r.sp.inc
+  cpu.r.clock.m = 3
+
+template RLr(cpu: PCPU, register: expr) {.immediate.} =
+  let bit7 = cpu.r.register shl 7
+  let prevCarry = cpu.isFSet(BitC)
+  cpu.r.register = cpu.r.register /<</ 1
+  if prevCarry: cpu.r.register = cpu.r.register or 1 # Set Bit 0
+  else: cpu.r.register = cpu.r.register and (not 1) # Unset bit 0
+  cpu.changeFlags(Z = >>(cpu.r.register == 0), H = FUnset, N = FUnset,
+                  C = >>(bit7 == 1))
+  cpu.r.clock.m = 2
+
+template INCrr(cpu: PCPU, r1, r2: expr, flags = false) {.immediate.} =
+  let x = ((cpu.r.r1 shl 8) or cpu.r.r2) + 1
+  let (hi, low) = (x shr 8 and 0xFF, x and 0xFF)
+  cpu.r.r2 = low; cpu.r.r1 = hi
+  if flags:
+    cpu.changeFlags(Z = >>(x == 0), H = >>((x and 0xF) == 0), N = FUnset)
+    cpu.r.clock.m = 3
 
 proc exec(cpu: PCPU) =
   ## Executes the next instruction
@@ -101,6 +133,26 @@ proc exec(cpu: PCPU) =
     cpu.r.clock.m = 1
     cpu.changeFlags(Z = >>(cpu.r.c == 0), H = >>((cpu.r.c and 0xF) == 0),
                     N = FUnset)
+  
+  of 0x03:
+    # INC BC
+    INCrr(cpu, b, c, true)
+  of 0x13:
+    # INC DE
+    INCrr(cpu, d, e, true)
+  of 0x23:
+    # INC HL
+    # Increment 16-bit HL
+    INCrr(cpu, H, L, true)
+  
+  of 0x05:
+    # DEC B
+    # Decrement B
+    cpu.r.b = (cpu.r.b - 1) and 0xFF
+    cpu.changeFlags(Z = >>(cpu.r.b == 0), H = >>((cpu.r.b and 0xF) == 0xF),
+                    N = FSet)
+    
+    cpu.r.clock.m = 1
 
   of 0x11:
     # LD DE, nn
@@ -109,6 +161,11 @@ proc exec(cpu: PCPU) =
     cpu.r.d = cpu.mem.readByte(cpu.r.pc+1)
     cpu.r.pc.inc(2)
     cpu.r.clock.m = 3
+  
+  of 0x17:
+    # RL A
+    # Rotate A left.
+    RLr(cpu, a)
   
   of 0x1A:
     # LD A, (DE)
@@ -131,6 +188,14 @@ proc exec(cpu: PCPU) =
     cpu.r.H = cpu.mem.readByte(cpu.r.pc+1)
     cpu.r.pc.inc(2)
     cpu.r.clock.m = 3
+  of 0x22:
+    # LDI (HL), A
+    # Save A to address pointed by HL and increment HL.
+    cpu.mem.writeByte((cpu.r.h shl 8) or cpu.r.l, cpu.r.a)
+    INCrr(cpu, H, L)
+    # TODO: Should flags be changed? (Z80 ref says they should.)
+    # cpu.changeFlags(H = FUnset, N = FUnset)
+    cpu.r.clock.m = 2
   
   of 0x31:
     # LD SP, nn
@@ -145,6 +210,7 @@ proc exec(cpu: PCPU) =
     let x = ((cpu.r.h shl 8) or cpu.r.l) - 1
     let (hi, low) = (x shr 8 and 0xFF, x and 0xFF)
     cpu.r.L = low; cpu.r.H = hi
+    # TODO: Should flags be changed? (Z80 ref says they should.)
     cpu.r.clock.m = 2
   
   of 0x4F:
@@ -152,7 +218,11 @@ proc exec(cpu: PCPU) =
     # Copy A into C.
     cpu.r.a = cpu.r.c
     cpu.r.clock.m = 1
-  
+  of 0x7B:
+    # LD A, E; Copy E into A
+    cpu.r.a = cpu.r.e
+    cpu.r.clock.m = 1
+    
   of 0x77:
     # LD (HL), A
     # Copy A to address pointed by HL
@@ -167,6 +237,19 @@ proc exec(cpu: PCPU) =
     cpu.changeFlags(Z = >>(cpu.r.a == 0), H = FUnset, C = FUnset)
     cpu.r.clock.m = 1
   
+  of 0xC1:
+    # POP BC
+    # Pop 16-bit value into BC
+    POPqq(cpu, b, c)
+  of 0xD1:
+    # POP DE
+    POPqq(cpu, d, e)
+  of 0xE1:
+    # POP HL
+    POPqq(cpu, H, L)
+  of 0xF1:
+    # POP AF
+    POPqq(cpu, a, f)
   of 0xC5:
     # PUSH BC
     # Push 16-bit BC onto stack.
@@ -181,6 +264,13 @@ proc exec(cpu: PCPU) =
     # PUSH AF
     PUSHqq(cpu, a, f)
   
+  of 0xC9:
+    # RET
+    # Return to calling routine.
+    cpu.r.pc = cpu.mem.readWord(cpu.r.sp)
+    cpu.r.sp.inc(2)
+    cpu.r.clock.m = 3
+  
   of 0xCB:
     # Extended Ops
     let extop = cpu.mem.readByte(cpu.r.pc)
@@ -189,8 +279,7 @@ proc exec(cpu: PCPU) =
     of 0x11:
       # RL C
       # Rotate C left.
-      assert false
-      
+      RLr(cpu, c)
     of 0x7C:
       # BIT 7, H
       # Test whether bit 7 of H is zero
@@ -220,6 +309,22 @@ proc exec(cpu: PCPU) =
     # LDH (0xFF00 + C), A
     # Save A at address pointed to by 0xFF00+C
     cpu.mem.writeByte(0xFF00 + cpu.r.c, cpu.r.a)
+    cpu.r.clock.m = 2
+  
+  of 0xFE:
+    # CP n; compare 8-bit immediate against A.
+    # TODO: This may be wrong. Review.
+    echo(cpu.r.pc, " ", cpu.mem.readByte(cpu.r.pc).toHex(4))
+    
+    var n = cpu.mem.readByte(cpu.r.pc)
+    var sum = cpu.r.a - n
+    echo(sum)
+    let isNegative = sum < 0
+    sum = sum and 0xFF
+    
+    cpu.r.pc.inc
+    cpu.changeFlags(C = >>isNegative, Z = >>(sum == 0), N = FSet, 
+                    H = >>((sum and 0xF) > (cpu.r.a and 0xF)))
     cpu.r.clock.m = 2
   else:
     echo "Unknown opcode: 0x", opcode.toHex(2)
