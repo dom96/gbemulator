@@ -89,6 +89,8 @@ proc reset*(mem: PMem) =
   for i in 0..mem.workRam.len: mem.workRam[i] = 0
 
 proc readByte*(mem: PMem, address: int32): int32 =
+  if (address in {0x104 .. 0x133}):
+    echo("Bios is accessing the location of the nintendo logo: ", address.toHex(4))
   case (address and 0xF000)
   of 0x0000:
     # BIOS
@@ -106,8 +108,18 @@ proc readByte*(mem: PMem, address: int32): int32 =
     of 0x0F00:
       if address > 0xFF7F:
         return mem.zeroRAM[address and 0x007F]
-      
-      assert false
+      else:
+        case address
+        of 0xFF42:
+          # ScrollY
+          return mem.gpu.scrollY
+        of 0xFF44:
+          # LCDC Y-Coordinate
+          #echo("0xFF44: (y-line is): ", mem.gpu.line)
+          return mem.gpu.line.int32
+        else:
+          echo("Read ", address.toHex(4))
+          assert false
     else:
       assert false
   else:
@@ -129,22 +141,41 @@ proc writeByte*(mem: PMem, address: int32, b: int32) =
     case address and 0x0F00
     of 0x0F00:
       if address > 0xFF7F:
-        echo("ZeroRam. Address: ", toHex(address, 4), " Value: ", toHex(b, 4))
+        #echo("ZeroRam. Address: ", toHex(address, 4), " Value: ", toHex(b, 4))
         mem.zeroRAM[address and 0x007F] = b
         return 
     
       case address
       of 0xFF11:
         # TODO:
-        echo("Sound Mode 1 register (0xFF11): ", b.toHex(4))
+        echo("Sound Mode 1 register, Sound length (0xFF11): ", b.toHex(4))
+      of 0xFF12:
+        # TODO:
+        echo("Sound Mode 1 register, Envelope (0xFF12): ", b.toHex(4))
+      of 0xFF13:
+        # TODO:
+        echo("Sound Mode 1 register, Freq lo (0xFF13): ", b.toHex(4))
+      of 0xFF24:
+        # TODO:
+        echo("Channel Control (0xFF24): ", b.toHex(4))
+      of 0xFF25:
+        # TODO:
+        echo("Selection of Sound output terminal (0xFF25): ", b.toHex(4))
       of 0xFF26:
         # TODO:
         echo("Sound on/off (0xFF26): ", b.toHex(4))
+      of 0xFF40:
+        echo("LCDC (0xFF40): ", b.toHex(4))
+        mem.gpu.setLCDC(b)
+      of 0xFF42:
+        echo("ScrollY = ", b.toHex(4), " ", b)
+        mem.gpu.scrollY = b
       of 0xFF47:
         # TODO:
         echo("BG Palette (0xFF47): ", b.toHex(4))
       else:
         echo("Interrupts. Address: 0x", toHex(Address, 4), " Value: ", toHex(b, 4))
+        assert false
     else:
       echo("0xF000. Address: 0x", toHex(Address, 4), " Value: ", toHex(b, 4))
   
