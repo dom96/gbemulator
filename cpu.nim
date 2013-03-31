@@ -603,8 +603,26 @@ proc next*(cpu: PCPU) =
 
 
 when isMainModule:
-  var cpu = newCpu(mem.load("/home/dom/code/nimrod/gbemulator/Pokemon_Red.gb"))
+  import parseopt
+  var cpu: PCPU
   
+  block:
+    var file: string
+    for kind, key,val in getopt():
+      case kind
+      of cmdArgument:
+        file = key
+      of cmdLongOption,cmdShortOption:
+        case key
+        of "file","f": file = val
+        else: echo "Unrecognized option: ", key
+      else: nil 
+    if file.isNil:
+      quit "Please run with the path of a rom to run"
+
+    cpu = newCpu(mem.load(file))
+
+
   proc CtrlCHook() {.noconv.} =
     echo("Ctrl+C")
     for i in countdown(min(100, cpu.trace.len), 1):
