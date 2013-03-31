@@ -612,7 +612,6 @@ when isMainModule:
       echo("  0x", t.opc.toHex(4), " @ 0x", t.a.toHex(4), "(", t.a, ") ", t.r, " ", cpu.trace.len-i)
     quit(1)
   #setControlCHook(CtrlCHook)
-  
   while True:
     cpu.next()
 

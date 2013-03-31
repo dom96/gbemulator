@@ -12,7 +12,7 @@ type
   TBGMap = enum
     TileMap0, TileMap1
 
-  TPaletteKind = enum
+  TPaletteKind* = enum
     PaletteBG, PaletteObj, PaletteObj1
 
   PGPU* = ref object
@@ -53,6 +53,14 @@ proc setLCDC*(gpu: PGPU, b: int32) =
   # TODO: Bit 6: Window Tile Map Display Select?
   echo("LCDC: Bit 6: ", (b and (1 shl 6)).toHex(2))
   gpu.LCDon = (b and (1 shl 7)) == 1
+
+proc setPalette*(gpu: PGPU, palette: TPaletteKind, b: int32) =
+  for i in 0 .. 3:
+    case (b shr (i*2)) and 3:
+    of 0: gpu.palette[PaletteBG][i] = colWhite
+    of 1: gpu.palette[PaletteBG][i] = rgb(192, 192, 192)
+    of 2: gpu.palette[PaletteBG][i] = rgb(96, 96, 96)
+    of 3: gpu.palette[PaletteBG][i] = colBlack
 
 proc getTileAddr(gpu: PGPU, index: int32): int =
   ## Returns the address of the **beginning** of the tile at ``index``.
@@ -146,9 +154,8 @@ proc renderDebugFullMap(gpu: PGPU) =
       y.inc
     else:
       x.inc
-  if gpu.debug:
-    sleep(5000)
-
+  gpu.surface.drawRect((gpu.scrollX.int, gpu.scrollY.int, 160, 144), colRed)
+  
 proc next*(gpu: PGPU, time: int) =
   gpu.clock.inc(time)
   #echo("GPU Mode: ", gpu.mode)

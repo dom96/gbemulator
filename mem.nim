@@ -185,9 +185,9 @@ proc writeByte*(mem: PMem, address: int32, b: int32) =
       of 0xFF42:
         #echo("ScrollY = ", b.toHex(4), " ", b)
         mem.gpu.scrollY = b
-      of 0xFF47:
-        # TODO:
+      of 0xFF47:  
         echo("BG Palette (0xFF47): ", b.toHex(4))
+        setPalette(mem.gpu, PaletteBG, b)
       else:
         echo("Interrupts. Address: 0x", toHex(Address, 4), " Value: ", toHex(b, 4))
         assert false
