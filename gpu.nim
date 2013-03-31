@@ -37,7 +37,7 @@ proc newGPU*(): PGPU =
   result.surface.fillSurface(colWhite)
   
   # Set default palette
-  result.palette[PaletteBG] = [colBlue, rgb(192, 192, 192), rgb(96, 96, 96), colBlack]
+  result.palette[PaletteBG] = [colWhite, rgb(192, 192, 192), rgb(96, 96, 96), colBlack]
 
 proc setLCDC*(gpu: PGPU, b: int32) =
   gpu.BGon = (b and 1) == 1
@@ -68,23 +68,17 @@ proc getTileRow(gpu: PGPU, index, line: int32): array[0..7, int32] =
   #echo("  getTileRow: ", tileAddr.toHex(4), " ", index, " ", line)
   var i = line*2
   let lowRow = gpu.vram[tileAddr+i]
-  
-  #if lowRow != 0: echo(lowRow, " ", lowRow.toBin(32), " ", tileAddr.toHex(4))
   let highRow = gpu.vram[tileAddr+i+1]
-  
-  #if highRow != 0: echo(highRow, highRow.toBin(32))
   for px in 0 .. 7:
-    let lowBit = if (lowRow and (1 shl (7-px))) == 0: 0 else: 1 
-    let highBit = if (highRow and (1 shl (7-px)))  == 0: 0 else: 2
-    #echo("  px: ", px, "; ", lowBit, "; ", highBit, ". ",toBin(lowRow and (1 shl (7-px)), 10))
+    let bitPx = 1 shl (7-px)
+    let lowBit = if (lowRow and bitPx) == 0: 0 else: 1 
+    let highBit = if (highRow and bitPx)  == 0: 0 else: 2
     result[px] = (lowBit or highBit).int32
-    #if lowRow != 0 or highRow != 0: echo(lowBit, " ", highBit)
     assert(result[px] >= 0 and result[px] < 4)
 
 proc getTileRow(gpu: PGPU, index: int32): array[0..7, int32] =
   let tileAddr = getTileAddr(gpu, index)
   let y = (gpu.line + gpu.scrollY) and 7
-  #echo("  getTileRow: ", tileAddr.toHex(4), " ", index, " ", gpu.line, " ", gpu.scrollY)
   var i = y
   for px in 0 .. 7:
     result[px] = (gpu.vram[y+tileAddr+i] shl 8) or gpu.vram[y+tileAddr+i+1]
@@ -133,7 +127,6 @@ proc renderTile(gpu: PGPU, a, x, y: int) =
   for tileY in 0 .. 7:
     var tileRow = getTileRow(gpu, tileIndex, tileY.int32)
     for tileX in 0 .. 7:
-      #echo(tileRow[tileX])
       gpu.surface[x + tileX, y + tileY] = gpu.palette[PaletteBG][tileRow[tileX]]
 
 

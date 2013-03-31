@@ -51,7 +51,7 @@ proc `$`(r: PRegister): string =
               r.c.toHex(2), r.d.toHex(2), r.e.toHex(2), r.H.toHex(2),
               r.L.toHex(2), r.f.toHex(2)])
 
-proc doTrace(cpu: PCPU) =
+proc doTrace(cpu: PCPU) {.deprecated.} =
   #if cpu.trace.len > 10000:
   #  for i in 0..5000:
   #    cpu.trace.delete(0)
