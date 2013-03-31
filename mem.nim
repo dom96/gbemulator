@@ -14,6 +14,7 @@ type
     workRAM: array[0 .. 8191, int32] # 8KB
     zeroRAM: array[0 .. 127, int32]
     gpu*: PGPU
+    fiveInstr*: bool
     
 proc hexdump(s: string) =
   for c in s:
@@ -90,11 +91,13 @@ proc reset*(mem: PMem) =
 
 proc readByte*(mem: PMem, address: int32): int32 =
   if (address in {0x104 .. 0x133}):
-    echo("Bios is accessing the location of the nintendo logo: ", address.toHex(4))
+    echo("Bios is accessing the location of the nintendo logo: ", address.toHex(4), " ", mem.rom[address.int].ord.toHex(4))
+    #echo(address > mem.bios.high)
+    #sleep(500)
   case (address and 0xF000)
   of 0x0000:
     # BIOS
-    if address > mem.bios.high: return 0 # TODO: Correct?
+    if address > mem.bios.high: return mem.rom[address.int].ord
     return mem.bios[address]
   of 0x1000, 0x2000, 0x3000:
     return mem.rom[address.int].ord
@@ -116,6 +119,8 @@ proc readByte*(mem: PMem, address: int32): int32 =
         of 0xFF44:
           # LCDC Y-Coordinate
           #echo("0xFF44: (y-line is): ", mem.gpu.line)
+          if mem.gpu.line == 144:
+            mem.fiveInstr = true
           return mem.gpu.line.int32
         else:
           echo("Read ", address.toHex(4))
@@ -129,12 +134,22 @@ proc readByte*(mem: PMem, address: int32): int32 =
 proc readWord*(mem: PMem, address: int32): int32 =
   return readByte(mem, address) or (readByte(mem, address+1) shl 8) 
 
+proc printVRAMInfo(address: int32) =
+  var saddr = address
+  if (address and 1) == 1: saddr.dec
+  var tile = (saddr shr 4) and 511
+  var y = (saddr shr 1) and 7
+  echo("  tile = ", tile, "; y = ", y) 
+  
 proc writeByte*(mem: PMem, address: int32, b: int32) =
   case (address and 0xF000)
   of 0x8000, 0x9000:
     # VRAM
-    # Each pixel is 2 bits. VRAM is the tileset.
-    echo("VRAM. Address: 0x", toHex(address, 4), " Value: ", toHex(b, 4))
+    # VRAM is the tileset.
+    if b != 0:
+      echo("VRAM. Address: 0x", toHex(address, 4), " Value: ", toHex(b, 4))
+      printVRAMInfo(address)
+      #sleep(50)
     mem.GPU.vram[address and 0x1FFF] = b
   
   of 0xF000:
@@ -168,7 +183,7 @@ proc writeByte*(mem: PMem, address: int32, b: int32) =
         echo("LCDC (0xFF40): ", b.toHex(4))
         mem.gpu.setLCDC(b)
       of 0xFF42:
-        echo("ScrollY = ", b.toHex(4), " ", b)
+        #echo("ScrollY = ", b.toHex(4), " ", b)
         mem.gpu.scrollY = b
       of 0xFF47:
         # TODO:

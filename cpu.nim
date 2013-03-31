@@ -1,7 +1,7 @@
 # Part of the Nimrod Gameboy emulator.
 # Copyright (C) Dominik Picheta.
 import mem, gpu
-import strutils
+import strutils, os
 type
   # m (machine cycles), t (time cycles).
   # Ref: http://www.zilog.com/docs/z80/um0080.pdf
@@ -16,6 +16,8 @@ type
     clock: TClock
     r: PRegister
     mem: PMem
+    trace: seq[tuple[a: int32, opc: int32, r: string]]
+    stopAfter: int
 
   TFlagState = enum
     FUnchanged, FSet, FUnset
@@ -39,8 +41,31 @@ proc newCPU(mem: PMem): PCPU =
   new(result)
   new(result.r)
   result.mem = mem
+  result.trace = @[]
+  result.stopAfter = -1
 
-# Split a 16-bit into 8-bit: let (a, b) = (x shr 8 and 0xff, x and 0xff)
+proc `$`(r: PRegister): string =
+  result = ""
+  result.add("pc: 0x$# sp: 0x$# a: 0x$# b: 0x$# c: 0x$# d: 0x$# e: 0x$# H: 0x$#, L: 0x$# f: 0x$#" % 
+             [r.pc.toHex(4), r.sp.toHex(4), r.a.toHex(4), r.b.toHex(2),
+              r.c.toHex(2), r.d.toHex(2), r.e.toHex(2), r.H.toHex(2),
+              r.L.toHex(2), r.f.toHex(2)])
+
+proc doTrace(cpu: PCPU) =
+  #if cpu.trace.len > 10000:
+  #  for i in 0..5000:
+  #    cpu.trace.delete(0)
+  if cpu.stopAfter == 0:
+    cpu.stopAfter = -1
+    #echo("Stop now!")
+    #sleep(500)
+  if cpu.mem.fiveInstr:
+    if cpu.stopAfter < 0:
+      cpu.trace.add((cpu.r.pc, cpu.mem.readByte(cpu.r.pc), "line is 144."))
+      cpu.stopAfter = 10
+      cpu.mem.fiveInstr = false
+  #cpu.trace.add((cpu.r.pc, cpu.mem.readByte(cpu.r.pc), $cpu.r))
+  if cpu.stopAfter > 0: cpu.stopAfter.dec
 
 template changeFlag(f: var int32, state: TFlagState, bit: int32)  =
   case state
@@ -63,11 +88,17 @@ proc `>>`(b: bool): TFlagState =
   if b: return FSet
   else: return FUnset
 
-proc `/<</`(v: int32, interval: int): int32 =
-  ## Circular shift 8-bit value left ``interval`` times.
-  let leftMost = v shr (8-interval)
-  result = ((v shl interval) or leftMost).int32
-  result = result and 0xFF
+proc checkOverflow(cpu: PCPU) =
+  assert cpu.r.pc <= high(uint16).int32
+  assert cpu.r.sp <= high(uint16).int32
+  assert cpu.r.a <= high(uint8).int32
+  assert cpu.r.b <= high(uint8).int32
+  assert cpu.r.c <= high(uint8).int32
+  assert cpu.r.d <= high(uint8).int32
+  assert cpu.r.e <= high(uint8).int32
+  assert cpu.r.H <= high(uint8).int32
+  assert cpu.r.L <= high(uint8).int32
+  assert cpu.r.f <= high(uint8).int32
 
 template LDrn(cpu: PCPU, register: expr) {.immediate.} =
   cpu.r.register = cpu.mem.readByte(cpu.r.pc)
@@ -90,11 +121,12 @@ template POPqq(cpu: PCPU, r1, r2: expr) {.immediate.} =
   cpu.r.clock.m = 3
 
 template RLr(cpu: PCPU, register: expr) {.immediate.} =
-  let bit7 = cpu.r.register shl 7
+  let bit7 = (cpu.r.register shr 7) and 1
   let prevCarry = cpu.isFSet(BitC)
-  cpu.r.register = cpu.r.register /<</ 1
-  if prevCarry: cpu.r.register = cpu.r.register or 1 # Set Bit 0
-  else: cpu.r.register = cpu.r.register and (not 1) # Unset bit 0
+  cpu.r.register = (cpu.r.register shl 1) or (if prevCarry: 1 else: 0)
+  cpu.r.register = cpu.r.register and 0xFF # Mask to 8-bits
+  #if prevCarry: cpu.r.register = cpu.r.register or 1 # Set Bit 0
+  #else: cpu.r.register = cpu.r.register and (not 1) # Unset bit 0
   cpu.changeFlags(Z = >>(cpu.r.register == 0), H = FUnset, N = FUnset,
                   C = >>(bit7 == 1))
   cpu.r.clock.m = 2
@@ -273,8 +305,9 @@ proc LDSimple(cpu: PCPU, opcode: int32) =
 
 proc exec(cpu: PCPU) =
   ## Executes the next instruction
+  doTrace(cpu)
   let opcode = cpu.mem.readByte(cpu.r.pc)
-  #echo("OPCODE: 0x", toHex(opcode, 2))
+  #echo("0x", toHex(opcode, 2), " | ", $cpu.r)
   cpu.r.pc.inc()
   case opcode
   of 0x06:
@@ -565,10 +598,36 @@ proc exec(cpu: PCPU) =
 
 proc next*(cpu: PCPU) =
   cpu.exec()
+  checkOverflow(cpu)
   cpu.mem.gpu.next(cpu.r.clock.m)
 
 
 when isMainModule:
   var cpu = newCpu(mem.load("/home/dom/code/nimrod/gbemulator/Pokemon_Red.gb"))
+  
+  proc CtrlCHook() {.noconv.} =
+    echo("Ctrl+C")
+    for i in countdown(min(100, cpu.trace.len), 1):
+      let t = cpu.trace[cpu.trace.len-i]
+      echo("  0x", t.opc.toHex(4), " @ 0x", t.a.toHex(4), "(", t.a, ") ", t.r, " ", cpu.trace.len-i)
+    quit(1)
+  #setControlCHook(CtrlCHook)
+  
   while True:
     cpu.next()
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
