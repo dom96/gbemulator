@@ -47,7 +47,15 @@ proc get8(cpu: CPU, op: Operand): uint8 =
   of RegisterCombo:
     assert false, "Cannot return uint16 in get8 for RegisterCombo."
   of Address:
-    let address = cpu.get16(op.op)
+    var address: uint16
+    if not op.op.word:
+      case op.op.name
+      of "C", "A8":
+        address = 0xFF00'u16 + cpu.get8(op.op).uint16
+      else:
+        assert false, "Unknown byte-sized address register " & op.op.name
+    else:
+      address = cpu.get16(op.op)
     return cpu.mem.read8(address)
   of IntLit:
     assert false
@@ -217,6 +225,8 @@ proc parseOperand(cpu: CPU, encoded: string): Operand =
     result = createRegOperand(encoded, addr cpu.f, true, BitC)
   of "NZ":
     result = createRegOperand(encoded, addr cpu.f, true, BitZ)
+  of "Z":
+    result = createRegOperand(encoded, addr cpu.f, false, BitZ)
   of "D16":
     result = Operand(name: encoded, kind: Immediate, word: true)
     cpu.pc.inc 2
@@ -286,27 +296,54 @@ proc execXOR(cpu: CPU, opc: Opcode, i: var int) =
   cpu.set(flags, zero)
 
 proc execJr(cpu: CPU, opc: Opcode, i: var int) =
-  # TODO: This won't always have two operands.
-  let (cond, displacement) = parseOperands(cpu, opc, i)
-  if cpu.isTrue(cond):
-    let newPc = cpu.add(displacement, cpu.pc)
+  let opOne = parseOperand(cpu, opc, i)
+
+  if opc.mnemonic[i] != '\0':
+    let (cond, displacement) = (opOne, parseOperand(cpu, opc, i))
+    if cpu.isTrue(cond):
+      let newPc = cpu.add(displacement, cpu.pc)
+      echo("PC: 0x$1 -> 0x$2" % [cpu.pc.toHex(), newPc.toHex()])
+      cpu.pc = newPc
+  else:
+    let newPc = cpu.add(opOne, cpu.pc)
     echo("PC: 0x$1 -> 0x$2" % [cpu.pc.toHex(), newPc.toHex()])
     cpu.pc = newPc
 
 proc execInc(cpu: CPU, opc: Opcode, i: var int) =
   let reg = parseOperand(cpu, opc, i)
-  let value = cpu.get8(reg)
-  let newValue = value+1
-  cpu.set(reg, newValue)
+  if not reg.word:
+    let value = cpu.get8(reg)
+    let newValue = value+1
+    cpu.set(reg, newValue)
 
-  # TODO: Flags are not affected for 16bit INC.
+    # Check for half carry.
+    let halfCarry = (((value and 0xF) + (1'u8 and 0xF)) and 0x10) == 0x10
+    let zero = newValue == 0
+    let flags = registerF(cpu)
+    let flagsValue = cpu.get8(flags)
+    cpu.set(flags, flagsValue.changeFlags(z = >>zero, n=FUnset, h = >>halfCarry))
+  else:
+    # Flags are not affected for 16bit INC.
+    let value = cpu.get16(reg)
+    cpu.set(reg, value+1)
 
-  # Check for half carry.
-  let halfCarry = (((value and 0xF) + (1 and 0xF)) and 0x10) == 0x10
-  let zero = newValue == 0
-  let flags = registerF(cpu)
-  let flagsValue = cpu.get8(flags)
-  cpu.set(flags, flagsValue.changeFlags(z = >>zero, n=FUnset, h = >>halfCarry))
+proc execDec(cpu: CPU, opc: Opcode, i: var int) =
+  let reg = parseOperand(cpu, opc, i)
+  if not reg.word:
+    let value = cpu.get8(reg)
+    let newValue = value-1
+    cpu.set(reg, newValue)
+
+    # Check for half carry.
+    let halfCarry = (((value and 0xF) - (1'u8 and 0xF)) and 0x10) == 0x10
+    let zero = newValue == 0
+    let flags = registerF(cpu)
+    let flagsValue = cpu.get8(flags)
+    cpu.set(flags, flagsValue.changeFlags(z = >>zero, n=FSet, h = >>halfCarry))
+  else:
+    # Flags are not affected for 16bit INC.
+    let value = cpu.get16(reg)
+    cpu.set(reg, value-1)
 
 proc execCall(cpu: CPU, opc: Opcode, i: var int) =
   let location = parseOperand(cpu, opc, i)
@@ -329,6 +366,47 @@ proc execPush(cpu: CPU, opc: Opcode, i: var int) =
   cpu.mem.write8(cpu.sp, uint8(value shr 8))
   cpu.sp.dec
   cpu.mem.write8(cpu.sp, uint8((value shl 8) shr 8))
+
+proc execPop(cpu: CPU, opc: Opcode, i: var int) =
+  let reg = parseOperand(cpu, opc, i)
+
+  let low = cpu.mem.read8(cpu.sp)
+  cpu.sp.inc
+  let high = cpu.mem.read8(cpu.sp)
+  cpu.sp.inc
+
+  cpu.set(reg, (uint16(high) shl 8) or uint16(low))
+
+proc execRet(cpu: CPU, opc: Opcode, i: var int) =
+  let low = cpu.mem.read8(cpu.sp)
+  cpu.sp.inc
+  let high = cpu.mem.read8(cpu.sp)
+  cpu.sp.inc
+
+  let newPc = (uint16(high) shl 8) or uint16(low)
+  echo("PC: 0x$1 -> 0x$2" % [cpu.pc.toHex(), newPc.toHex()])
+  cpu.pc =  newPc
+
+proc execSubCp(cpu: CPU, opc: Opcode, i: var int) =
+  let reg = parseOperand(cpu, opc, i)
+
+  let accumulator = createRegOperand("A", addr cpu.a)
+  let aValue = cpu.get8(accumulator)
+
+  let value = cpu.get8(reg)
+  let newValue = aValue - value
+
+  if opc.mnemonic == "SUB":
+    cpu.set(reg, newValue)
+
+  # Check for half carry.
+  let halfCarry = (((aValue and 0xF) - (value and 0xF)) and 0x10) == 0x10
+  let carry = aValue < value
+  let zero = newValue == 0
+  let flags = registerF(cpu)
+  let flagsValue = cpu.get8(flags)
+  cpu.set(flags,
+      flagsValue.changeFlags(z = >>zero, n=FSet, h = >>halfCarry, c = >>carry))
 
 # ---- Prefix CB opcodes follow.
 
@@ -394,11 +472,19 @@ proc parseMnemonic(cpu: CPU, opc: Opcode) =
     execJr(cpu, opc, i)
   of "INC":
     execInc(cpu, opc, i)
+  of "DEC":
+    execDec(cpu, opc, i)
   of "CALL":
     execCall(cpu, opc, i)
   of "PUSH":
     execPush(cpu, opc, i)
-  of "BIT":
+  of "POP":
+    execPop(cpu, opc, i)
+  of "RET":
+    execRet(cpu, opc, i)
+  of "CP":
+    execSubCp(cpu, opc, i)
+  of "BIT": # Prefix CB's start here
     execBit(cpu, opc, i)
   of "RL", "RLA":
     execRL(cpu, opc, i)
@@ -447,7 +533,7 @@ when isMainModule:
       block cpuLoop:
         while true:
           for brk in breakpoints:
-            if cpu.pc >= brk:
+            if cpu.pc == brk:
               echo("Reached 0x", brk.toHex())
               break cpuLoop
           cpu.next()

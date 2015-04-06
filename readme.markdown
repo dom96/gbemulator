@@ -9,7 +9,12 @@ using many debugging statements to figure out where I'm going wrong.
 
 ## Status
 
-Currently the emulator only gets as far as displaying the Nintendo logo.
+<del>Currently the emulator only gets as far as displaying the Nintendo logo.</del>
+
+We get to **0x0064** in the BIOS!
+
+0x0064 in the BIOS waits for the vertical-blank period, since we have no GPU
+hooked up yet it waits for that forever.
 
 ## References
 
