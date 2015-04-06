@@ -6,13 +6,10 @@ import gpu
 
 type
   PMem* = ref object
+    mem: array[0xFFFF, int32] # 64K
     rom: string
     gameName*: string
     cartType*, romSize*, ramSize*: char
-    bios: array[0 .. 255, int32]    # 255 Bytes
-    extRAM: array[0 .. 8191, int32] # 8KB
-    workRAM: array[0 .. 8191, int32] # 8KB
-    zeroRAM: array[0 .. 127, int32]
     gpu*: PGPU
     fiveInstr*: bool
     
@@ -81,7 +78,7 @@ proc load*(path: string): PMem =
   result.cartType = result.rom[0x0147]
   result.romSize  = result.rom[0x0148]
   result.ramSize  = result.rom[0x0149]
-  result.bios = bios
+  #result.bios = bios
 
   result.GPU = newGPU()
 
@@ -90,46 +87,48 @@ proc reset*(mem: PMem) =
   for i in 0..mem.workRam.len: mem.workRam[i] = 0
 
 proc readByte*(mem: PMem, address: int32): int32 =
-  if (address in {0x104 .. 0x133}):
-    echo("Bios is accessing the location of the nintendo logo: ", address.toHex(4), " ", mem.rom[address.int].ord.toHex(4))
-    #echo(address > mem.bios.high)
-    #sleep(500)
-  case (address and 0xF000)
-  of 0x0000:
-    # BIOS
-    if address > mem.bios.high: return mem.rom[address.int].ord
-    return mem.bios[address]
-  of 0x1000, 0x2000, 0x3000:
-    return mem.rom[address.int].ord
-  of 0x4000, 0x5000, 0x6000, 0x7000:
-    # ROM Bank 1
-  of 0x8000, 0x9000:
-    # VRAM
-    return mem.GPU.vram[address and 0x1FFF]
-  of 0xF000:
-    case address and 0x0F00
-    of 0x0F00:
-      if address > 0xFF7F:
-        return mem.zeroRAM[address and 0x007F]
-      else:
-        case address
-        of 0xFF42:
-          # ScrollY
-          return mem.gpu.scrollY
-        of 0xFF44:
-          # LCDC Y-Coordinate
-          #echo("0xFF44: (y-line is): ", mem.gpu.line)
-          if mem.gpu.line == 144:
-            mem.fiveInstr = true
-          return mem.gpu.line.int32
+  return mem.mem[address]
+  when false:
+    if (address in {0x104 .. 0x133}):
+      echo("Bios is accessing the location of the nintendo logo: ", address.toHex(4), " ", mem.rom[address.int].ord.toHex(4))
+      #echo(address > mem.bios.high)
+      #sleep(500)
+    case (address and 0xF000)
+    of 0x0000:
+      # BIOS
+      if address > mem.bios.high: return mem.rom[address.int].ord
+      return mem.bios[address]
+    of 0x1000, 0x2000, 0x3000:
+      return mem.rom[address.int].ord
+    of 0x4000, 0x5000, 0x6000, 0x7000:
+      # ROM Bank 1
+    of 0x8000, 0x9000:
+      # VRAM
+      return mem.GPU.vram[address and 0x1FFF]
+    of 0xF000:
+      case address and 0x0F00
+      of 0x0F00:
+        if address > 0xFF7F:
+          return mem.zeroRAM[address and 0x007F]
         else:
-          echo("Read ", address.toHex(4))
-          assert false
+          case address
+          of 0xFF42:
+            # ScrollY
+            return mem.gpu.scrollY
+          of 0xFF44:
+            # LCDC Y-Coordinate
+            #echo("0xFF44: (y-line is): ", mem.gpu.line)
+            if mem.gpu.line == 144:
+              mem.fiveInstr = true
+            return mem.gpu.line.int32
+          else:
+            echo("Read ", address.toHex(4))
+            assert false
+      else:
+        assert false
     else:
+      echo("Read ", address.toHex(4))
       assert false
-  else:
-    echo("Read ", address.toHex(4))
-    assert false
 
 proc readWord*(mem: PMem, address: int32): int32 =
   return readByte(mem, address) or (readByte(mem, address+1) shl 8) 
@@ -142,63 +141,67 @@ proc printVRAMInfo(address: int32) =
   echo("  tile = ", tile, "; y = ", y) 
   
 proc writeByte*(mem: PMem, address: int32, b: int32) =
-  case (address and 0xF000)
-  of 0x8000, 0x9000:
-    # VRAM
-    # VRAM is the tileset.
-    if b != 0:
-      echo("VRAM. Address: 0x", toHex(address, 4), " Value: ", toHex(b, 4))
-      printVRAMInfo(address)
-      #sleep(50)
-    mem.GPU.vram[address and 0x1FFF] = b
-  
-  of 0xF000:
-    case address and 0x0F00
-    of 0x0F00:
-      if address > 0xFF7F:
-        #echo("ZeroRam. Address: ", toHex(address, 4), " Value: ", toHex(b, 4))
-        mem.zeroRAM[address and 0x007F] = b
-        return 
+  mem.mem[address] = b
+
+  when false:
+
+    case (address and 0xF000)
+    of 0x8000, 0x9000:
+      # VRAM
+      # VRAM is the tileset.
+      if b != 0:
+        echo("VRAM. Address: 0x", toHex(address, 4), " Value: ", toHex(b, 4))
+        printVRAMInfo(address)
+        #sleep(50)
+      mem.GPU.vram[address and 0x1FFF] = b
     
-      case address
-      of 0xFF11:
-        # TODO:
-        echo("Sound Mode 1 register, Sound length (0xFF11): ", b.toHex(4))
-      of 0xFF12:
-        # TODO:
-        echo("Sound Mode 1 register, Envelope (0xFF12): ", b.toHex(4))
-      of 0xFF13:
-        # TODO:
-        echo("Sound Mode 1 register, Freq lo (0xFF13): ", b.toHex(4))
-      of 0xFF24:
-        # TODO:
-        echo("Channel Control (0xFF24): ", b.toHex(4))
-      of 0xFF25:
-        # TODO:
-        echo("Selection of Sound output terminal (0xFF25): ", b.toHex(4))
-      of 0xFF26:
-        # TODO:
-        echo("Sound on/off (0xFF26): ", b.toHex(4))
-      of 0xFF40:
-        echo("LCDC (0xFF40): ", b.toHex(4))
-        mem.gpu.setLCDC(b)
-      of 0xFF42:
-        #echo("ScrollY = ", b.toHex(4), " ", b)
-        mem.gpu.scrollY = b
-      of 0xFF47:  
-        echo("BG Palette (0xFF47): ", b.toHex(4))
-        setPalette(mem.gpu, PaletteBG, b)
+    of 0xF000:
+      case address and 0x0F00
+      of 0x0F00:
+        if address > 0xFF7F:
+          #echo("ZeroRam. Address: ", toHex(address, 4), " Value: ", toHex(b, 4))
+          mem.zeroRAM[address and 0x007F] = b
+          return 
+      
+        case address
+        of 0xFF11:
+          # TODO:
+          echo("Sound Mode 1 register, Sound length (0xFF11): ", b.toHex(4))
+        of 0xFF12:
+          # TODO:
+          echo("Sound Mode 1 register, Envelope (0xFF12): ", b.toHex(4))
+        of 0xFF13:
+          # TODO:
+          echo("Sound Mode 1 register, Freq lo (0xFF13): ", b.toHex(4))
+        of 0xFF24:
+          # TODO:
+          echo("Channel Control (0xFF24): ", b.toHex(4))
+        of 0xFF25:
+          # TODO:
+          echo("Selection of Sound output terminal (0xFF25): ", b.toHex(4))
+        of 0xFF26:
+          # TODO:
+          echo("Sound on/off (0xFF26): ", b.toHex(4))
+        of 0xFF40:
+          echo("LCDC (0xFF40): ", b.toHex(4))
+          mem.gpu.setLCDC(b)
+        of 0xFF42:
+          #echo("ScrollY = ", b.toHex(4), " ", b)
+          mem.gpu.scrollY = b
+        of 0xFF47:
+          echo("BG Palette (0xFF47): ", b.toHex(4))
+          setPalette(mem.gpu, PaletteBG, b)
+        else:
+          echo("Interrupts. Address: 0x", toHex(Address, 4), " Value: ", toHex(b, 4))
+          assert false
       else:
-        echo("Interrupts. Address: 0x", toHex(Address, 4), " Value: ", toHex(b, 4))
-        assert false
+        echo("0xF000. Address: 0x", toHex(Address, 4), " Value: ", toHex(b, 4))
+    
     else:
-      echo("0xF000. Address: 0x", toHex(Address, 4), " Value: ", toHex(b, 4))
-  
-  else:
-    echo("writeByte. Address: 0x", toHex(address, 4), " Value: ", toHex(b, 4))
+      echo("writeByte. Address: 0x", toHex(address, 4), " Value: ", toHex(b, 4))
 
 proc writeWord*(mem: PMem, address: int32, w: int32) =
-  mem.writeByte(address, w and 255)
+  mem.writeByte(address, w and 0xFF)
   mem.writeByte(address+1, w shr 8)
 
 when isMainModule:

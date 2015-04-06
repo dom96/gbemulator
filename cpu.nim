@@ -603,7 +603,7 @@ proc next*(cpu: PCPU) =
 
 
 when isMainModule:
-  var cpu = newCpu(mem.load("/home/dom/code/nimrod/gbemulator/Pokemon_Red.gb"))
+  #var cpu = newCpu(mem.load("/home/dom/code/nimrod/gbemulator/Pokemon_Red.gb"))
   
   proc CtrlCHook() {.noconv.} =
     echo("Ctrl+C")
@@ -612,6 +612,10 @@ when isMainModule:
       echo("  0x", t.opc.toHex(4), " @ 0x", t.a.toHex(4), "(", t.a, ") ", t.r, " ", cpu.trace.len-i)
     quit(1)
   #setControlCHook(CtrlCHook)
+
+  var mem: PMem
+  
+  var cpu = newCpu(mem)
   while True:
     cpu.next()
 

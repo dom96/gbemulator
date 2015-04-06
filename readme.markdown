@@ -22,3 +22,11 @@ https://github.com/Two9A/jsGB/blob/master/js
 https://github.com/grantgalitz/GameBoy-Online/blob/master/js/GameBoyCore.js
 
 http://imrannazar.com/Gameboy-Z80-Opcode-Map
+
+http://www.zophar.net/fileuploads/2/10816buusf/z80opcod.txt
+
+http://gekkio.fi/blog/2015-01-13-mooneye-gb-a-gameboy-emulator-written-in-rust.html
+
+https://realboyemulator.wordpress.com/2013/01/03/a-look-at-the-game-boy-bootstrap-let-the-fun-begin/
+
+http://datacrystal.romhacking.net/wiki/Pok%C3%A9mon_Yellow
