@@ -407,8 +407,9 @@ proc execSubCp(cpu: CPU, opc: Opcode, i: var int) =
   let value = cpu.get8(reg)
   let newValue = aValue - value
 
-  if opc.mnemonic == "SUB":
-    cpu.set(reg, newValue)
+  # TODO: I should really separate these properly.
+  if opc.mnemonic.startsWith("SUB"):
+    cpu.set(accumulator, newValue)
 
   # Check for half carry.
   let halfCarry = (((aValue and 0xF) - (value and 0xF)) and 0x10) == 0x10
@@ -473,6 +474,8 @@ proc parseMnemonic(cpu: CPU, opc: Opcode) =
 
   cpu.pc.inc
   case opcType.toUpper()
+  of "NOP":
+    nil
   of "LD", "LDH":
     execLoad(cpu, opc, i)
   of "XOR":
@@ -493,7 +496,7 @@ proc parseMnemonic(cpu: CPU, opc: Opcode) =
     execPop(cpu, opc, i)
   of "RET":
     execRet(cpu, opc, i)
-  of "CP":
+  of "CP", "SUB":
     execSubCp(cpu, opc, i)
   of "BIT": # Prefix CB's start here
     execBit(cpu, opc, i)
@@ -557,11 +560,40 @@ proc echoCurrentOpcode(cpu: CPU) =
   echo "0x$1: $2 (0x$3)" % [cpu.pc.toHex(),
       meaning.mnemonic, opcode.toHex()]
 
+proc verifyChecksum(cpu: CPU) =
+  const nintendoGraphic: array[0x104'u16 .. 0x133'u16, uint8] =
+    [
+      0xCE'u8, 0xED, 0x66, 0x66, 0xCC, 0x0D, 0x00, 0x0B,
+      0x03, 0x73, 0x00, 0x83, 0x00, 0x0C, 0x00, 0x0D,
+      0x00, 0x08, 0x11, 0x1F, 0x88, 0x89, 0x00, 0x0E,
+      0xDC, 0xCC, 0x6E, 0xE6, 0xDD, 0xDD, 0xD9, 0x99,
+      0xBB, 0xBB, 0x67, 0x63, 0x6E, 0x0E, 0xEC, 0xCC,
+      0xDD, 0xDC, 0x99, 0x9F, 0xBB, 0xB9, 0x33, 0x3E
+    ]
+  for i in 0x104'u16 .. 0x133'u16:
+    assert cpu.mem.read8(i) == nintendoGraphic[i], "Invalid Nintendo Graphic"
+
+proc dump(cpu: CPU) =
+  ## For debugging info.
+  var data = ""
+  for i in 0x8000 .. 0x81A0:
+    data.add(cast[char](cpu.mem.read8(i.uint16)))
+
+  writeFile(getCurrentDir() / "dump8000.mem", data)
+
+  data = ""
+  for i in 0x9900 .. 0x9930:
+    data.add(cast[char](cpu.mem.read8(i.uint16)))
+
+  writeFile(getCurrentDir() / "dump9900.mem", data)
+
 when isMainModule:
   var mem = newMemory()
   mem.loadFile(getCurrentDir() / "tetris.gb", getCurrentDir() / "bios.gb")
   var cpu = newCPU(mem)
   var gpu = newGPU(mem)
+
+  verifyChecksum(cpu)
 
   var breakpoints: seq[uint16] = @[]
 
@@ -579,6 +611,8 @@ when isMainModule:
     of "b", "break":
       breakpoints.add(split[1].parseHexInt().uint16)
       echo "Breakpoint at 0x", breakpoints[^1].toHex()
+    of "d", "dump":
+      dump(cpu)
     of "c", "continue":
       block cpuLoop:
         while true:

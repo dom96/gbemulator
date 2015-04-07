@@ -11,10 +11,16 @@ using many debugging statements to figure out where I'm going wrong.
 
 <del>Currently the emulator only gets as far as displaying the Nintendo logo.</del>
 
-We get to **0x0064** in the BIOS!
+We get to **0x0086** in the BIOS!
 
 0x0064 in the BIOS waits for the vertical-blank period, since we have no GPU
 hooked up yet it waits for that forever.
+
+## Development
+
+### Debugging
+
+The bgb emulator was very handy for debugging.
 
 ## References
 
@@ -43,3 +49,9 @@ http://www.codeslinger.co.uk/pages/projects/gameboy/lcd.html
 https://code.google.com/p/megaboy/wiki/Interrupts
 
 http://imrannazar.com/GameBoy-Emulation-in-JavaScript:-GPU-Timings
+
+http://blog.kevtris.org/blogfiles/Nitty%20Gritty%20Gameboy%20VRAM%20Timing.txt
+
+https://slashbinbash.wordpress.com/2013/02/07/gameboy-tile-mapping-between-image-and-memory/
+
+GB Test ROMs - http://blargg.8bitalley.com/parodius/gb-tests/
