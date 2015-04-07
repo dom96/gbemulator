@@ -1,10 +1,12 @@
-import mem2, unsigned, os, strutils, opcodes, parseutils, utils
+import mem2, unsigned, os, strutils, opcodes, parseutils, utils, gpu2
 type
   CPU = ref object
     ## Registers
     pc, sp: uint16
     a, b, c, d, e, h, l, f: uint8
     mem: Memory
+    ime: bool # Interrupt Master Enable Flag
+    clock: int
 
   OperandKind = enum
     Immediate, Address, Register, RegisterCombo, IntLit
@@ -20,7 +22,6 @@ type
       first, second: pointer
     of Immediate:
       signed: bool
-      pcIncremented: bool ## To prevent PC from being incremented multiple times
     of Address:
       op: Operand ## Operand holding the address
       decrement: bool ## (HL-)
@@ -29,13 +30,13 @@ type
       num: range[0 .. 7]
     word: bool ## Determines whether location points to a uint8 (false) or uint16 (true).
 
-
   Operands = tuple[dest, src: Operand]
 
 proc newCPU(mem: Memory): CPU =
   new result
   result.mem = mem
   result.pc = 0
+  result.ime = true
 
 proc get16(cpu: CPU, op: Operand): uint16
 proc get8(cpu: CPU, op: Operand): uint8 =
@@ -193,6 +194,10 @@ proc verifyFlags(cpu: CPU, opc: Opcode, prevFlags: uint8) =
   elif opc.c == '0': assert((flags and 0b00010000) == 0)
   elif opc.c == '-': assert(isFlagSet(flags, BitC) == isFlagSet(prevFlags, BitC))
 
+  # Also verify clock.
+  assert(cpu.clock != 0)
+  assert(cpu.clock == opc.cycles or cpu.clock == opc.idleCycles)
+
 proc parseOperand(cpu: CPU, encoded: string): Operand =
   case encoded
   of "A":
@@ -304,6 +309,9 @@ proc execJr(cpu: CPU, opc: Opcode, i: var int) =
       let newPc = cpu.add(displacement, cpu.pc)
       echo("PC: 0x$1 -> 0x$2" % [cpu.pc.toHex(), newPc.toHex()])
       cpu.pc = newPc
+      cpu.clock.inc opc.cycles
+    else:
+      cpu.clock.inc opc.idleCycles
   else:
     let newPc = cpu.add(opOne, cpu.pc)
     echo("PC: 0x$1 -> 0x$2" % [cpu.pc.toHex(), newPc.toHex()])
@@ -345,18 +353,21 @@ proc execDec(cpu: CPU, opc: Opcode, i: var int) =
     let value = cpu.get16(reg)
     cpu.set(reg, value-1)
 
-proc execCall(cpu: CPU, opc: Opcode, i: var int) =
-  let location = parseOperand(cpu, opc, i)
-
+proc execCallLoc(cpu: CPU, location: uint16) =
   # Push PC onto Stack.
   cpu.sp.dec
   cpu.mem.write8(cpu.sp, uint8(cpu.pc shr 8))
   cpu.sp.dec
   cpu.mem.write8(cpu.sp, uint8((cpu.pc shl 8) shr 8))
 
-  let newPc = cpu.get16(location)
+  let newPc = location
   echo("PC: 0x$1 -> 0x$2" % [cpu.pc.toHex(), newPc.toHex()])
   cpu.pc = newPc
+
+proc execCall(cpu: CPU, opc: Opcode, i: var int) =
+  let location = parseOperand(cpu, opc, i)
+
+  execCallLoc(cpu, cpu.get16(location))
 
 proc execPush(cpu: CPU, opc: Opcode, i: var int) =
   let valueOp = parseOperand(cpu, opc, i)
@@ -491,8 +502,44 @@ proc parseMnemonic(cpu: CPU, opc: Opcode) =
   else:
     assert false, "Unknown opcode type: " & opcType
 
+  if cpu.clock == 0 and opc.cycles == opc.idleCycles:
+    cpu.clock.inc opc.cycles
+
+proc handleInterrupts(cpu: CPU) =
+  if not cpu.ime: return
+  let interruptFlag = cpu.mem.read8(0xFF0F)
+  let interruptEnabled = cpu.mem.read8(0xFFFF)
+  var location: uint16 = 0
+  if ((interruptFlag and 1) == 1) and
+     ((interruptEnabled and 1) == 1):
+    # V-Blank interrupt.
+    location = 0x0040'u16
+    cpu.mem.write8(0xFF0F, interruptFlag and 0b11110)
+  elif (interruptFlag and (1 shl 1)) == 1 shl 1:
+    # LCD STAT
+    location = 0x0048'u16
+    cpu.mem.write8(0xFF0F, interruptFlag and 0b11101)
+  elif (interruptFlag and (1 shl 2)) == 1 shl 2:
+    # Timer
+    location = 0x0050'u16
+    cpu.mem.write8(0xFF0F, interruptFlag and 0b11011)
+  elif (interruptFlag and (1 shl 3)) == 1 shl 3:
+    # Serial
+    location = 0x0058'u16
+    cpu.mem.write8(0xFF0F, interruptFlag and 0b10111)
+  elif (interruptFlag and (1 shl 4)) == 1 shl 4:
+    # Joypad
+    location = 0x0060'u16
+    cpu.mem.write8(0xFF0F, interruptFlag and 0b01111)
+
+  if location != 0:
+    cpu.ime = false
+    execCallLoc(cpu, location)
+    cpu.clock.inc(5 * 4)
+
 proc next(cpu: CPU) =
   ## Executes the next opcode.
+  cpu.clock = 0
   let prevFlags = cpu.f
   let opcode = opcs[cpu.mem.read8(cpu.pc)]
   parseMnemonic(cpu, opcode)
@@ -501,6 +548,8 @@ proc next(cpu: CPU) =
   if opcode.mnemonic != "PREFIX CB":
     verifyFlags(cpu, opcode, prevFlags)
 
+  handleInterrupts(cpu)
+
 proc echoCurrentOpcode(cpu: CPU) =
   let opcode = cpu.mem.read8(cpu.pc)
   let meaning = opcs[opcode]
@@ -508,11 +557,11 @@ proc echoCurrentOpcode(cpu: CPU) =
   echo "0x$1: $2 (0x$3)" % [cpu.pc.toHex(),
       meaning.mnemonic, opcode.toHex()]
 
-
 when isMainModule:
   var mem = newMemory()
-  mem.loadFile(getCurrentDir() / "bios.gb")
+  mem.loadFile(getCurrentDir() / "tetris.gb", getCurrentDir() / "bios.gb")
   var cpu = newCPU(mem)
+  var gpu = newGPU(mem)
 
   var breakpoints: seq[uint16] = @[]
 
@@ -526,6 +575,7 @@ when isMainModule:
     case cmd.toLower()
     of "n", "next":
       cpu.next()
+      gpu.next(cpu.clock)
     of "b", "break":
       breakpoints.add(split[1].parseHexInt().uint16)
       echo "Breakpoint at 0x", breakpoints[^1].toHex()
@@ -537,5 +587,6 @@ when isMainModule:
               echo("Reached 0x", brk.toHex())
               break cpuLoop
           cpu.next()
+          gpu.next(cpu.clock)
     else:
       echoCurrentOpcode(cpu)

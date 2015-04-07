@@ -35,3 +35,11 @@ http://gekkio.fi/blog/2015-01-13-mooneye-gb-a-gameboy-emulator-written-in-rust.h
 https://realboyemulator.wordpress.com/2013/01/03/a-look-at-the-game-boy-bootstrap-let-the-fun-begin/
 
 http://datacrystal.romhacking.net/wiki/Pok%C3%A9mon_Yellow
+
+http://marc.rawer.de/Gameboy/Docs/GBCPUman.pdf
+
+http://www.codeslinger.co.uk/pages/projects/gameboy/lcd.html
+
+https://code.google.com/p/megaboy/wiki/Interrupts
+
+http://imrannazar.com/GameBoy-Emulation-in-JavaScript:-GPU-Timings
