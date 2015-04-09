@@ -25,6 +25,7 @@ proc newGPU*(mem: Memory): GPU =
   new result
   result.surface = newScreenSurface(640, 480)
   initDefaultFont(r"C:\Windows\Fonts\DejaVuSans.ttf", 12)
+  result.surface.fillSurface(colWhite)
 
   result.mem = mem
 
@@ -136,7 +137,6 @@ proc renderAll(gpu: GPU) =
   gpu.surface.drawRect((scrollX.int, scrollY.int, 160, 144), colRed)
 
 proc next*(gpu: GPU, clock: int) =
-  gpu.surface.fillSurface(colWhite)
 
   gpu.clock.inc clock
 
@@ -165,7 +165,7 @@ proc next*(gpu: GPU, clock: int) =
         gpu.mem.requestInterrupt(0)
 
         renderAll(gpu)
-        drawMem(gpu)
+        #drawMem(gpu)
         sdl.updateRect(gpu.surface.s, 0, 0, 640, 480)
       else:
         gpu.mode = OamRead
