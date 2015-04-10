@@ -1,7 +1,9 @@
-import unsigned, strutils
+import unsigned, strutils, macros
 type
   FlagState* = enum
     FUnchanged, FSet, FUnset
+
+const enableEchod* = false
 
 const
   BitZ*: uint8 = 0b10000000
@@ -36,3 +38,20 @@ proc toHex*(x: uint8): string =
 
 proc toHex*(x: uint16): string =
   x.BiggestInt.toHex(4)
+
+proc echod*(msg: varargs[string, `$`]) =
+  if enableEchod:
+    for m in msg:
+      stdout.write(m)
+    echo()
+
+proc echodReg*(regName: string, oldVal, newVal: uint8 | uint16) =
+  echod("Register $1: 0x$2 -> 0x$3" %
+        [regName, oldVal.toHex(), newVal.toHex()])
+
+proc echodRegCombo*(regName: string, oldVal1, oldVal2: uint8,
+                    newVal: uint16) =
+  echod("Register $1: 0x$2$3 -> 0x$4" %
+        [regName, oldVal1.toHex(), oldVal2.toHex(),
+         newVal.toHex()])
+

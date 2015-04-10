@@ -16,6 +16,25 @@ We get to **0x0086** in the BIOS!
 0x0064 in the BIOS waits for the vertical-blank period, since we have no GPU
 hooked up yet it waits for that forever.
 
+The speed: current average 4,084,472 cycles per second. (in release mode)
+
+### Performance numbers
+
+These are the Clock cycles per second using bench.gb.
+
+```
+1,727,968 - Abstracted - ~-50%
+13,671,816 - Abstraced with -d:release - 225%
+11,659,384 - Abstracted (but operands replaced)
+219,323,976 - Abstracted (but operands replaced) with -d:release - 5375%
+12,779,408 - As fast as possible
+17,344,544 - As fast as possible with -d:release
+344,247,552 - As fast as possible with -d:release, no gpu - 8500%
+
+344,000,000-4,000,000 = 340,000,000
+340,000,000/4,000,000 = 85*100 = 8500% increase in speed vs. GB
+```
+
 ## Development
 
 ### Debugging

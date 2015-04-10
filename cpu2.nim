@@ -1,5 +1,5 @@
 import mem2, unsigned, os, strutils, opcodes, parseutils, utils, gpu2, tables
-import times
+import times, macros
 type
   CPU = ref object
     ## Registers
@@ -13,9 +13,10 @@ type
     Immediate, Address, Register, RegisterCombo, IntLit
 
   RegisterName = enum
-    RegA, RegB, RegC, RegD, RegE, RegF, RegH, RegL, RegPC, RegSP
+    RegA = "a", RegB = "b", RegC = "c", RegD = "d", RegE = "e", RegF = "f",
+    RegH = "h", RegL = "l", RegPC = "pc", RegSP = "sp"
 
-  Operand = object
+  Operand = ref object
     name: string
     case kind: OperandKind
     of Register:
@@ -165,13 +166,13 @@ proc set(cpu: CPU, op: Operand, value: uint16) =
   case op.kind
   of Register:
     let old = getRegisterAddr16(cpu, op.location)[].toHex()
-    echo("Register $1: 0x$2 -> 0x$3" %
+    echod("Register $1: 0x$2 -> 0x$3" %
           [op.name, old, value.toHex()])
     getRegisterAddr16(cpu, op.location)[] = value
   of RegisterCombo:
     let old = getRegisterAddr8(cpu, op.first)[].toHex() &
               getRegisterAddr8(cpu, op.second)[].toHex()
-    echo("Register $1: 0x$2 -> 0x$3" %
+    echod("Register $1: 0x$2 -> 0x$3" %
           [op.name, old, value.toHex()])
     getRegisterAddr8(cpu, op.first)[] = (value shr 8).uint8
     getRegisterAddr8(cpu, op.second)[] = cast[uint8](value)
@@ -187,7 +188,7 @@ proc set(cpu: CPU, op: Operand, value: uint8) =
   case op.kind
   of Register:
     let old = getRegisterAddr8(cpu, op.location)[].toHex()
-    echo("Register $1: 0x$2 -> 0x$3" %
+    echod("Register $1: 0x$2 -> 0x$3" %
           [op.name, old, value.toHex()])
     getRegisterAddr8(cpu, op.location)[] = value
   of RegisterCombo:
@@ -274,7 +275,8 @@ proc parseOperands(cpu: CPU, opc: Opcode): tuple[dest, src: Operand] =
 
 proc execLoad(cpu: CPU, opc: Opcode) =
   let (dest, src) = parseOperands(cpu, opc)
-
+  #let dest = createRegOperand("B", RegB, false)
+  #let src = Operand(name: "A8", kind: Immediate, signed: false, word: false, pc: 1)
   if src.word:
     cpu.set(dest, cpu.get16(src))
   else:
@@ -304,15 +306,22 @@ proc execJr(cpu: CPU, opc: Opcode) =
     let (cond, displacement) = (opOne, parseOperand(cpu, opc.operandTwo))
     if cpu.isTrue(cond):
       let newPc = cpu.add(displacement, cpu.pc)
-      echo("PC: 0x$1 -> 0x$2" % [cpu.pc.toHex(), newPc.toHex()])
+      echod("PC: 0x$1 -> 0x$2" % [cpu.pc.toHex(), newPc.toHex()])
       cpu.pc = newPc
       cpu.clock.inc opc.cycles
     else:
       cpu.clock.inc opc.idleCycles
   else:
     let newPc = cpu.add(opOne, cpu.pc)
-    echo("PC: 0x$1 -> 0x$2" % [cpu.pc.toHex(), newPc.toHex()])
+    echod("PC: 0x$1 -> 0x$2" % [cpu.pc.toHex(), newPc.toHex()])
     cpu.pc = newPc
+
+proc execJp(cpu: CPU, opc: Opcode) =
+  let opOne = parseOperand(cpu, opc.operandOne)
+
+  let newPc = cpu.get16(opOne)
+  echod("PC: 0x$1 -> 0x$2" % [cpu.pc.toHex(), newPc.toHex()])
+  cpu.pc = newPc
 
 proc execInc(cpu: CPU, opc: Opcode) =
   let reg = parseOperand(cpu, opc.operandOne)
@@ -358,7 +367,7 @@ proc execCallLoc(cpu: CPU, location: uint16) =
   cpu.mem.write8(cpu.sp, uint8((cpu.pc shl 8) shr 8))
 
   let newPc = location
-  echo("PC: 0x$1 -> 0x$2" % [cpu.pc.toHex(), newPc.toHex()])
+  echod("PC: 0x$1 -> 0x$2" % [cpu.pc.toHex(), newPc.toHex()])
   cpu.pc = newPc
 
 proc execCall(cpu: CPU, opc: Opcode) =
@@ -392,7 +401,7 @@ proc execRet(cpu: CPU, opc: Opcode) =
   cpu.sp.inc
 
   let newPc = (uint16(high) shl 8) or uint16(low)
-  echo("PC: 0x$1 -> 0x$2" % [cpu.pc.toHex(), newPc.toHex()])
+  echod("PC: 0x$1 -> 0x$2" % [cpu.pc.toHex(), newPc.toHex()])
   cpu.pc =  newPc
 
 proc execSubCp(cpu: CPU, opc: Opcode) =
@@ -474,6 +483,8 @@ proc parseMnemonic(cpu: CPU, opc: Opcode) =
     execPrefix(cpu, opc)
   of "JR":
     execJr(cpu, opc)
+  of "JP":
+    execJp(cpu, opc)
   of "INC":
     execInc(cpu, opc)
   of "DEC":
@@ -530,18 +541,391 @@ proc handleInterrupts(cpu: CPU) =
     execCallLoc(cpu, location)
     cpu.clock.inc(5 * 4)
 
+proc parseOperandCT(encoded: string): Operand =
+  case encoded
+  of "A":
+    result = createRegOperand(encoded, RegA, false)
+  of "B":
+    result = createRegOperand(encoded, RegB, false)
+  of "C":
+    result = createRegOperand(encoded, RegC, false)
+  of "D":
+    result = createRegOperand(encoded, RegD, false)
+  of "E":
+    result = createRegOperand(encoded, RegE, false)
+  of "H":
+    result = createRegOperand(encoded, RegH, false)
+  of "L":
+    result = createRegOperand(encoded, RegL, false)
+  of "F":
+    result = createRegOperand(encoded, RegF, false)
+  of "HL":
+    result = createRegComboOperand(encoded, RegH, RegL)
+  of "SP":
+    result = createRegOperand(encoded, RegSP, true)
+  of "PC":
+    result = createRegOperand(encoded, RegPC, true)
+  of "DE":
+    result = createRegComboOperand(encoded, RegD, RegE)
+  of "BC":
+    result = createRegComboOperand(encoded, RegB, RegC)
+  of "AF":
+    result = createRegComboOperand(encoded, RegA, RegF)
+  of "NC":
+    result = createRegOperand(encoded, RegF, false, true, BitC)
+  of "NZ":
+    result = createRegOperand(encoded, RegF, false, true, BitZ)
+  of "Z":
+    result = createRegOperand(encoded, RegF, false, false, BitZ)
+  of "D16":
+    result = Operand(name: encoded, kind: Immediate, word: true)
+  of "D8":
+    result = Operand(name: encoded, kind: Immediate, word: false)
+  of "R8":
+    result = Operand(name: encoded, kind: Immediate, signed: true, word: false)
+  of "A8":
+    result = Operand(name: encoded, kind: Immediate, signed: false, word: false)
+  of "A16":
+    result = Operand(name: encoded, kind: Immediate, signed: false, word: true)
+  of "(HL+)":
+    result = Operand(name: "(HL+)", kind: Address, opName: "HL", increment: true, word: true)
+  of "(HL-)":
+    result = Operand(name: "(HL-)", kind: Address, opName: "HL", decrement: true, word: true)
+  of "(HL)":
+    result = Operand(name: "(HL)", kind: Address, opName: "HL", word: true)
+  of "(C)":
+    result = Operand(name: "(C)", kind: Address, opName: "C")
+  of "(A8)":
+    result = Operand(name: "(A8)", kind: Address, opName: "A8")
+  of "(DE)":
+    result = Operand(name: "(DE)", kind: Address, opName: "DE", word: true)
+  of "(A16)":
+    result = Operand(name: "(A16)", kind: Address, opName: "A16", word: true)
+  of "(BC)":
+    result = Operand(name: "(BC)", kind: Address, opName: "BC", word: true)
+  of "0", "1", "2", "3", "4", "5", "6", "7":
+    result = Operand(name: encoded, kind: IntLit, num: encoded.parseInt())
+  else:
+    assert false, "Unknown operand: " & encoded.toUpper()
+
+proc assertNodeSize(result: var NimNode, n: NimNode, size: int) {.compileTime.} =
+  # -> assert sizeof(`n`) == 2
+  result.add quote do:
+    assert sizeof(`n`) == `size`
+
+proc debugRegSet(result: var NimNode, operand: Operand,
+                 reg, src: NimNode) {.compileTime.} =
+  when enableEchod:
+    # -> echodReg(..)
+    var opName = operand.name.newStrLitNode()
+    result.add quote do:
+      echodReg(`opName`, `reg`, `src`)
+
+proc debugRegComboSet(result: var NimNode, operand: Operand,
+                      first, second, src: NimNode) {.compileTime.}  =
+  when enableEchod:
+    # -> echodReg(..)
+    var opName = operand.name.newStrLitNode()
+    result.add quote do:
+      echodRegCombo(`opName`, `first`, `second`, `src`)
+
+proc createGet16(operand: Operand): NimNode {.compileTime.}
+proc createGet8(operand: Operand): NimNode {.compileTime.}
+proc calculateAddress(operand: Operand):
+    tuple[address: NimNode, addrOp: Operand] {.compileTime.} =
+  var address: NimNode
+  let addrOp = parseOperandCT(operand.opName)
+  if not addrOp.word:
+    case addrOp.name
+    of "C", "A8":
+      var offset = parseExpr("0xFF00'u16")
+      var addrVal = newCall("uint16", createGet8(addrOp))
+      address = infix(offset, "+", addrVal)
+    else:
+      assert false, "Unknown byte-sized address register " & addrOp.name
+  else:
+    address = createGet16(addrOp)
+
+  return (address, addrOp)
+
+proc createSet16(operand: Operand, src: NimNode): NimNode {.compileTime.}
+proc incDecAddress(operand, addrOp: Operand,
+    result: var NimNode) {.compileTime.} =
+  # Check whether we should decrement/increment
+  if operand.decrement:
+    # -> cpu.r = cpu.r - 1
+    result.add createSet16(addrOp,
+        infix(createGet16(addrOp), "-", newIntLitNode(1)))
+  elif operand.increment:
+    # -> cpu.r = cpu.r + 1
+    result.add createSet16(addrOp,
+        infix(createGet16(addrOp), "+", newIntLitNode(1)))
+
+proc createSet16(operand: Operand, src: NimNode): NimNode =
+  result = newStmtList()
+
+  assert(operand.word, operand.name)
+  assertNodeSize(result, src, 2)
+
+  case operand.kind
+  of Register:
+    let reg = newDotExpr(newIdentNode("cpu"), newIdentNode(operand.name.toLower()))
+    assertNodeSize(result, reg, 2)
+    debugRegSet(result, operand, reg, src)
+    # -> cpu.r = `src`
+    result.add newAssignment(
+        reg,
+        src
+      )
+  of RegisterCombo:
+    let first = newDotExpr(newIdentNode("cpu"),
+        newIdentNode($operand.first))
+    assertNodeSize(result, first, 1)
+    let second = newDotExpr(newIdentNode("cpu"),
+        newIdentNode($operand.second))
+    assertNodeSize(result, second, 1)
+    debugRegComboSet(result, operand, first, second, src)
+    # -> cpu.r1 = (`src` shr 8).uint8
+    result.add newAssignment(
+        first,
+        newCall(newIdentNode("uint8"), infix(src, "shr", newIntLitNode(8)))
+      )
+    # -> cpu.r2 = (`src` shr 8).uint8
+    result.add newAssignment(
+        second,
+        newNimNode(nnkCast).add(newIdentNode("uint8"), src)
+      )
+  of Address:
+    let (address, addrOp) = calculateAddress(operand)
+
+    # -> cpu.mem.write16(`address`, `src`)
+    result.add quote do:
+      cpu.mem.write16(`address`, `src`)
+
+    incDecAddress(operand, addrOp, result)
+  else:
+    assert false, $operand.kind
+
+proc createSet8(operand: Operand, src: NimNode): NimNode {.compileTime.} =
+  result = newStmtList()
+
+  #assert(not operand.word, operand.name)
+  # XXX: Setting an 8-bit value to a 16-bit dest sounds ok.
+  assertNodeSize(result, src, 1)
+
+  case operand.kind
+  of Register:
+    let reg = newDotExpr(newIdentNode("cpu"), newIdentNode(operand.name.toLower()))
+    assertNodeSize(result, reg, 1)
+    debugRegSet(result, operand, reg, src)
+    # -> cpu.r = `src`
+    result.add newAssignment(
+        reg,
+        src
+      )
+  of RegisterCombo:
+    assert false, "RegisterCombo takes 16-bit values."
+  of Address:
+    let (address, addrOp) = calculateAddress(operand)
+
+    # -> cpu.mem.write8(`address`, `src`)
+    result.add quote do:
+      cpu.mem.write8(`address`, `src`)
+
+    if operand.word:
+      incDecAddress(operand, addrOp, result)
+    else:
+      # No decrement/increment for 8-bit addresses.
+      assert(not operand.decrement)
+      assert(not operand.increment)
+  else:
+    assert false, $operand.kind
+
+proc createGet16(operand: Operand): NimNode =
+  # TODO: Using a nnkStmtListExpr here causes compiler crash.
+
+  assert(operand.word, operand.name)
+
+  var tempIdent = newIdentNode("temp")
+
+  case operand.kind
+  of Immediate:
+    # let temp = cpu.mem.read16(cpu.pc)
+    result = parseExpr("cpu.mem.read16(cpu.pc)")
+  of Register:
+    var regIdent = newIdentNode($operand.location)
+    result = quote do:
+      cpu.`regIdent`
+  of RegisterCombo:
+    let first = newIdentNode($operand.first)
+    let second = newIdentNode($operand.second)
+    result = quote do:
+      (cpu.`first`.uint16 shl 8) or cpu.`second`.uint16
+  of Address:
+    let (address, addrOp) = calculateAddress(operand)
+
+    var procBody = newStmtList()
+    var resultIdent = genSym(nskVar, "result")
+    procBody.add quote do:
+      var `resultIdent` = cpu.mem.read16(`address`)
+
+    incDecAddress(operand, addrOp, procBody)
+
+    procBody.add newNimNode(nnkReturnStmt).add resultIdent
+
+    result = newStmtList()
+    var name = genSym(nskProc, "derefAddr")
+    result.add newProc(name, [newIdentNode"uint16"], procBody)
+    result.add newCall(name)
+  else:
+    assert false, $operand.kind
+
+  #assertNodeSize(result, tempIdent, 1)
+
+proc createGet8(operand: Operand): NimNode =
+  if operand.kind != Address:
+    assert(not operand.word)
+
+  case operand.kind
+  of Immediate:
+    # let temp = cpu.mem.read8(cpu.pc)
+    result = quote do:
+      cpu.mem.read8(cpu.pc)
+  of Register:
+    var regIdent = newIdentNode($operand.location)
+    result = quote do:
+      cpu.`regIdent`
+  of RegisterCombo:
+    assert false, "Cannot create 16-bit RegisterCombo, 8-bit expected."
+  of Address:
+    let (address, addrOp) = calculateAddress(operand)
+
+    var procBody = newStmtList()
+    var resultIdent = genSym(nskVar, "result")
+    procBody.add quote do:
+      var `resultIdent` = cpu.mem.read8(`address`)
+
+    incDecAddress(operand, addrOp, procBody)
+
+    procBody.add newNimNode(nnkReturnStmt).add resultIdent
+
+    result = newStmtList()
+    var name = genSym(nskProc, "derefAddr")
+    result.add newProc(name, [newIdentNode"uint8"], procBody)
+    result.add newCall(name)
+  else:
+    assert false, $operand.kind
+
+  #assertNodeSize(result, tempIdent, 1)
+
+template genGeneric(name, body: expr, contents: stmt): stmt {.immediate.} =
+  for opc {.inject.} in opcs:
+    if opc.mnemonic == name:
+      var ofBranch = newNimNode(nnkOfBranch)
+      ofBranch.add newIntLitNode(opc.opcode)
+
+      var body = newStmtList()
+
+      var operandOne {.inject.}: Operand = nil
+      var operandTwo {.inject.}: Operand = nil
+      if opc.operandOne != "":
+         operandOne = parseOperandCT(opc.operandOne)
+      if opc.operandTwo != "":
+         operandTwo = parseOperandCT(opc.operandTwo)
+
+      contents
+
+      if opc.operandTwo != "":
+        if operandTwo.kind == Immediate:
+          if operandTwo.word:
+            body.add parseExpr("cpu.pc.inc 2")
+          else:
+            body.add parseExpr("cpu.pc.inc")
+
+      # TODO: IdleCycles
+      body.add parseExpr("cpu.clock.inc " & $opc.cycles)
+
+      ofBranch.add body
+      result.add ofBranch
+
+proc genLoad(result: NimNode) {.compileTime.} =
+  genGeneric("LD", body):
+    var src: NimNode
+    if operandTwo.kind == Address:
+      if operandOne.word:
+        src = createGet16(operandTwo)
+        body.add createSet16(operandOne, src)
+      else:
+        src = createGet8(operandTwo)
+        body.add createSet8(operandOne, src)
+    elif operandOne.kind == Address:
+      if operandTwo.word:
+        src = createGet16(operandTwo)
+        body.add createSet16(operandOne, src)
+      else:
+        src = createGet8(operandTwo)
+        body.add createSet8(operandOne, src)
+    else:
+      if operandOne.word and operandTwo.word:
+        body.add createSet16(operandOne, createGet16(operandTwo))
+      elif not operandOne.word and not operandTwo.word:
+        body.add createSet8(operandOne, createGet8(operandTwo))
+      else:
+        assert false
+
+proc genJp(result: NimNode) {.compileTime.} =
+  genGeneric("JP", body):
+    if operandTwo == nil:
+      let dest = parseOperandCT("PC")
+      body.add createSet16(dest, createGet16(operandOne))
+    else:
+      discard # TODO
+
+macro genOpcodeLogic(): stmt =
+  ## We want to generate a fast case statement dealing with all opcodes defined
+  ## in the opcodes module.
+
+  result = newNimNode(nnkCaseStmt)
+  result.add(newIdentNode("opcodeAddr"))
+
+  genLoad(result)
+  genJp(result)
+
+  result.add(newNimNode(nnkElse).add(parseExpr("assert false")))
+
+  echo(result.toStrLit())
+
 proc next(cpu: CPU) =
   ## Executes the next opcode.
   cpu.clock = 0
   let prevFlags = cpu.f
-  let opcode = opcs[cpu.mem.read8(cpu.pc)]
-  parseMnemonic(cpu, opcode)
+  let opcodeAddr = cpu.mem.read8(cpu.pc)
+  when false:
+    let opcode = opcs[opcodeAddr]
+    parseMnemonic(cpu, opcode)
+  else:
+    cpu.pc.inc
+    genOpcodeLogic()
+    when false:
+      let opcode = opcs[opcodeAddr]
+      let op = parseOperand(cpu, opcode.operandOne)
+      cpu.pc.inc
+      case opcodeAddr
+      of 0x06:
+        #cpu.b = cpu.mem.read8(cpu.pc)
+        cpu.pc.inc
+        cpu.clock.inc 8
+      of 0xC3:
+        cpu.pc = cpu.mem.read16(cpu.pc)
+        cpu.pc.inc 2
+        cpu.clock.inc 16
+      else: assert false
 
   # PREFIX CB does its own verification.
-  if opcode.opcode != 0xCB:
-    verifyFlags(cpu, opcode, prevFlags)
+  #if opcode.opcode != 0xCB:
+  #  verifyFlags(cpu, opcode, prevFlags)
 
-  handleInterrupts(cpu)
+  #handleInterrupts(cpu)
 
 proc echoCurrentOpcode(cpu: CPU) =
   let opcode = cpu.mem.read8(cpu.pc)
@@ -578,9 +962,9 @@ proc dump(cpu: CPU) =
 
   writeFile(getCurrentDir() / "dump9900.mem", data)
 
-when isMainModule:
+proc main() =
   var mem = newMemory()
-  mem.loadFile(getCurrentDir() / "tetris.gb", getCurrentDir() / "bios.gb")
+  mem.loadFile(getCurrentDir() / "tetris.gb", getCurrentDir() / "bench.gb")
   var cpu = newCPU(mem)
   var gpu = newGPU(mem)
 
@@ -615,7 +999,7 @@ when isMainModule:
               echo("Reached 0x", brk.toHex())
               break cpuLoop
           cpu.next()
-          gpu.next(cpu.clock)
+          #gpu.next(cpu.clock)
           counter.inc cpu.clock
           if epochTime() - timeCounter >= 1.0:
             writeFile(getCurrentDir() / "ips.txt", $counter)
@@ -623,3 +1007,6 @@ when isMainModule:
             timeCounter = epochTime()
     else:
       echoCurrentOpcode(cpu)
+
+when isMainModule:
+  main()

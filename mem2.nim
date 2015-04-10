@@ -26,8 +26,8 @@ proc read16*(m: Memory, address: uint16): uint16 =
 proc write8*(m: Memory, address: uint16, data: uint8) =
   let old = m.mem[address]
   m.mem[address] = data
-  echo("Memory 0x$1: 0x$2 -> 0x$3" %
-     [address.toHex(), old.toHex(), data.toHex()])
+  echod("Memory 0x$1: 0x$2 -> 0x$3" %
+       [address.toHex(), old.toHex(), data.toHex()])
 
 proc write16*(m: Memory, address: uint16, data: uint16) =
   m.mem[address] = (data shr 8).uint8
