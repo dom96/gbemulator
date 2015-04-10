@@ -84,11 +84,11 @@ proc parseOperand(cpu: CPU, operand: string): Operand =
   assert operand != ""
   assert(operandTable.hasKey(operand), "Unknown operand: " & operand)
   result = operandTable[operand]
-  if result.kind == Immediate:
-    if result.word:
-      cpu.pc.inc 2
-    else:
-      cpu.pc.inc
+  #if result.kind == Immediate:
+  #  if result.word:
+  #    cpu.pc.inc 2
+  #  else:
+  #    cpu.pc.inc
 
 proc newCPU(mem: Memory): CPU =
   new result
@@ -664,11 +664,11 @@ proc incDecAddress(operand, addrOp: Operand,
 proc createSet16(operand: Operand, src: NimNode): NimNode =
   result = newStmtList()
 
-  assert(operand.word, operand.name)
   assertNodeSize(result, src, 2)
 
   case operand.kind
   of Register:
+    assert(operand.word, operand.name)
     let reg = newDotExpr(newIdentNode("cpu"), newIdentNode(operand.name.toLower()))
     assertNodeSize(result, reg, 2)
     debugRegSet(result, operand, reg, src)
@@ -709,12 +709,12 @@ proc createSet16(operand: Operand, src: NimNode): NimNode =
 proc createSet8(operand: Operand, src: NimNode): NimNode {.compileTime.} =
   result = newStmtList()
 
-  #assert(not operand.word, operand.name)
   # XXX: Setting an 8-bit value to a 16-bit dest sounds ok.
   assertNodeSize(result, src, 1)
 
   case operand.kind
   of Register:
+    assert(not operand.word, operand.name)
     let reg = newDotExpr(newIdentNode("cpu"), newIdentNode(operand.name.toLower()))
     assertNodeSize(result, reg, 1)
     debugRegSet(result, operand, reg, src)
@@ -780,8 +780,6 @@ proc createGet16(operand: Operand): NimNode =
   else:
     assert false, $operand.kind
 
-  #assertNodeSize(result, tempIdent, 1)
-
 proc createGet8(operand: Operand): NimNode =
   if operand.kind != Address:
     assert(not operand.word)
@@ -816,11 +814,9 @@ proc createGet8(operand: Operand): NimNode =
   else:
     assert false, $operand.kind
 
-  #assertNodeSize(result, tempIdent, 1)
-
 template genGeneric(name, body: expr, contents: stmt): stmt {.immediate.} =
   for opc {.inject.} in opcs:
-    if opc.mnemonic == name:
+    if opc.mnemonic == name:# and opc.opcode in {0xC3, 0x06}:
       var ofBranch = newNimNode(nnkOfBranch)
       ofBranch.add newIntLitNode(opc.opcode)
 
@@ -850,28 +846,18 @@ template genGeneric(name, body: expr, contents: stmt): stmt {.immediate.} =
 
 proc genLoad(result: NimNode) {.compileTime.} =
   genGeneric("LD", body):
-    var src: NimNode
-    if operandTwo.kind == Address:
-      if operandOne.word:
-        src = createGet16(operandTwo)
-        body.add createSet16(operandOne, src)
-      else:
-        src = createGet8(operandTwo)
-        body.add createSet8(operandOne, src)
-    elif operandOne.kind == Address:
-      if operandTwo.word:
-        src = createGet16(operandTwo)
-        body.add createSet16(operandOne, src)
-      else:
-        src = createGet8(operandTwo)
-        body.add createSet8(operandOne, src)
+    var word = false
+    if operandOne.kind == Address:
+      word = operandTwo.word
+    elif operandTwo.kind == Address:
+      word = operandOne.word
     else:
-      if operandOne.word and operandTwo.word:
-        body.add createSet16(operandOne, createGet16(operandTwo))
-      elif not operandOne.word and not operandTwo.word:
-        body.add createSet8(operandOne, createGet8(operandTwo))
-      else:
-        assert false
+      word = operandOne.word and operandTwo.word
+
+    if word:
+      body.add createSet16(operandOne, createGet16(operandTwo))
+    else:
+      body.add createSet8(operandOne, createGet8(operandTwo))
 
 proc genJp(result: NimNode) {.compileTime.} =
   genGeneric("JP", body):
@@ -907,12 +893,12 @@ proc next(cpu: CPU) =
     cpu.pc.inc
     genOpcodeLogic()
     when false:
-      let opcode = opcs[opcodeAddr]
-      let op = parseOperand(cpu, opcode.operandOne)
+      #let opcode = opcs[opcodeAddr]
+      #let op = parseOperand(cpu, opcode.operandOne)
       cpu.pc.inc
       case opcodeAddr
       of 0x06:
-        #cpu.b = cpu.mem.read8(cpu.pc)
+        cpu.b = cpu.mem.read8(cpu.pc)
         cpu.pc.inc
         cpu.clock.inc 8
       of 0xC3:
