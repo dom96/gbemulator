@@ -45,166 +45,11 @@ proc createRegComboOperand(name: string, first, second: RegisterName): Operand =
   Operand(kind: RegisterCombo, name: name, first: first,
           second: second, word: true)
 
-proc parseOperand(cpu: CPU, operand: string): Operand =
-  ## Returns the requested operand and increases PC proportionally.
-  nil # TODO: DETELEME
-
 proc newCPU(mem: Memory): CPU =
   new result
   result.mem = mem
   result.pc = 0
   result.ime = true
-
-proc getRegisterAddr8(cpu: CPU, reg: RegisterName): ptr uint8 =
-  # TODO Make this return a var?
-  case reg
-  of RegA: result = addr cpu.a
-  of RegB: result = addr cpu.b
-  of RegC: result = addr cpu.c
-  of RegD: result = addr cpu.d
-  of RegE: result = addr cpu.e
-  of RegF: result = addr cpu.f
-  of RegH: result = addr cpu.h
-  of RegL: result = addr cpu.l
-  else:
-    assert false, "Invalid register access. Want 8-bit, access to 16-bit"
-
-proc getRegisterAddr16(cpu: CPU, reg: RegisterName): ptr uint16 =
-  case reg
-  of RegPC: result = addr cpu.pc
-  of RegSP: result = addr cpu.sp
-  else:
-    assert false, "Invalid register access. Want 16-bit, access to 8-bit"
-
-proc get16(cpu: CPU, op: Operand): uint16
-proc get8(cpu: CPU, op: Operand): uint8 =
-  assert(not op.word)
-  case op.kind
-  of Register:
-    return getRegisterAddr8(cpu, op.location)[]
-  of RegisterCombo:
-    assert false, "Cannot return uint16 in get8 for RegisterCombo."
-  of Address:
-    var address: uint16
-    let addrOp = parseOperand(cpu, op.opName)
-    if not addrOp.word:
-      case addrOp.name
-      of "C", "A8":
-        address = 0xFF00'u16 + cpu.get8(addrOp).uint16
-      else:
-        assert false, "Unknown byte-sized address register " & addrOp.name
-    else:
-      address = cpu.get16(addrOp)
-    result = cpu.mem.read8(address)
-
-    # There won't ever be any increments/decrements for 8-bit registers
-    assert(not op.increment)
-    assert(not op.decrement)
-  of IntLit:
-    assert false
-  of Immediate:
-    result = cpu.mem.read8(cpu.pc - 1)
-
-proc get16(cpu: CPU, op: Operand): uint16 =
-  assert(op.word)
-  case op.kind
-  of Register:
-    return getRegisterAddr16(cpu, op.location)[]
-  of RegisterCombo:
-    return (getRegisterAddr8(cpu, op.first)[].uint16 shl 8) or
-            getRegisterAddr8(cpu, op.second)[].uint16
-  of Address:
-    assert false
-  of IntLit:
-    assert false
-  of Immediate:
-    result = cpu.mem.read16(cpu.pc - 2)
-
-proc set(cpu: CPU, op: Operand, value: uint16) =
-  assert op.word, "Operand was: " & op.name
-  case op.kind
-  of Register:
-    let old = getRegisterAddr16(cpu, op.location)[].toHex()
-    echod("Register $1: 0x$2 -> 0x$3" %
-          [op.name, old, value.toHex()])
-    getRegisterAddr16(cpu, op.location)[] = value
-  of RegisterCombo:
-    let old = getRegisterAddr8(cpu, op.first)[].toHex() &
-              getRegisterAddr8(cpu, op.second)[].toHex()
-    echod("Register $1: 0x$2 -> 0x$3" %
-          [op.name, old, value.toHex()])
-    getRegisterAddr8(cpu, op.first)[] = (value shr 8).uint8
-    getRegisterAddr8(cpu, op.second)[] = cast[uint8](value)
-  of Address:
-    assert false
-  of IntLit:
-    assert false
-  of Immediate:
-    assert false, "Cannot set immediate."
-
-proc set(cpu: CPU, op: Operand, value: uint8) =
-  assert(not op.word)
-  case op.kind
-  of Register:
-    let old = getRegisterAddr8(cpu, op.location)[].toHex()
-    echod("Register $1: 0x$2 -> 0x$3" %
-          [op.name, old, value.toHex()])
-    getRegisterAddr8(cpu, op.location)[] = value
-  of RegisterCombo:
-    assert false, "Need 16 bits for two registers"
-  of Address:
-    var address: uint16
-    let addrOp = parseOperand(cpu, op.opName)
-    if not addrOp.word:
-      case addrOp.name
-      of "C", "A8":
-        address = 0xFF00'u16 + cpu.get8(addrOp).uint16
-      else:
-        assert false, "Unknown byte-sized address register " & addrOp.name
-    else:
-      address = cpu.get16(addrOp)
-    let old = cpu.mem.read8(address)
-    cpu.mem.write8(address, value)
-
-    # Check whether we should decrement/increment
-    if op.decrement:
-      cpu.set(addrOp, cpu.get16(addrOp)-1)
-    elif op.increment:
-      cpu.set(addrOp, cpu.get16(addrOp)+1)
-  of IntLit:
-    assert false
-  of Immediate:
-    assert false, "Cannot set immediate."
-
-proc isTrue(cpu: CPU, op: Operand): bool =
-  case op.kind
-  of Register:
-    assert op.flagMask != 0
-    result = cpu.f.isFlagSet(op.flagMask.uint8)
-    if op.negated: result = not result
-  else:
-    assert false
-
-proc add(cpu: CPU, op: Operand, y: uint16): uint16 =
-  ## This should only be used in JR.
-
-  assert op.kind == Immediate
-
-  if op.word:
-    let data = cpu.get16(op)
-    if op.signed:
-      return uint16(cast[int16](data) + y.int64)
-    else:
-      return data + y
-  else:
-    let data = cpu.get8(op)
-    if op.signed:
-      return uint16(cast[int8](data) + y.int64)
-    else:
-      return data.uint16 + y
-
-proc registerF(cpu: CPU): Operand =
-  assert false
 
 proc verifyFlags(cpu: CPU, opc: Opcode, prevFlags: uint8) =
   let flags = cpu.f
@@ -228,96 +73,6 @@ proc verifyFlags(cpu: CPU, opc: Opcode, prevFlags: uint8) =
   assert(cpu.clock != 0)
   assert(cpu.clock == opc.cycles or cpu.clock == opc.idleCycles)
 
-proc parseOperands(cpu: CPU, opc: Opcode): tuple[dest, src: Operand] =
-  result.dest = parseOperand(cpu, opc.operandOne)
-  result.src = parseOperand(cpu, opc.operandTwo)
-
-proc execLoad(cpu: CPU, opc: Opcode) =
-  let (dest, src) = parseOperands(cpu, opc)
-  #let dest = createRegOperand("B", RegB, false)
-  #let src = Operand(name: "A8", kind: Immediate, signed: false, word: false, pc: 1)
-  if src.word:
-    cpu.set(dest, cpu.get16(src))
-  else:
-    cpu.set(dest, cpu.get8(src))
-
-proc execXOR(cpu: CPU, opc: Opcode) =
-  let src = parseOperand(cpu, opc.operandOne)
-
-  # Destination for XOR is always register A.
-  let dest = cpu.parseOperand("A")
-
-  assert(not src.word)
-  let value = cpu.get8(dest) xor cpu.get8(src)
-  cpu.set(dest, value)
-
-  let flags = registerF(cpu)
-  # Only Z flag is affected.
-  let zero: uint8 =
-    if value == 0: 0b10000000
-    else: 0
-  cpu.set(flags, zero)
-
-proc execJr(cpu: CPU, opc: Opcode) =
-  let opOne = parseOperand(cpu, opc.operandOne)
-
-  if opc.operandTwo != "":
-    let (cond, displacement) = (opOne, parseOperand(cpu, opc.operandTwo))
-    if cpu.isTrue(cond):
-      let newPc = cpu.add(displacement, cpu.pc)
-      echod("PC: 0x$1 -> 0x$2" % [cpu.pc.toHex(), newPc.toHex()])
-      cpu.pc = newPc
-      cpu.clock.inc opc.cycles
-    else:
-      cpu.clock.inc opc.idleCycles
-  else:
-    let newPc = cpu.add(opOne, cpu.pc)
-    echod("PC: 0x$1 -> 0x$2" % [cpu.pc.toHex(), newPc.toHex()])
-    cpu.pc = newPc
-
-proc execJp(cpu: CPU, opc: Opcode) =
-  let opOne = parseOperand(cpu, opc.operandOne)
-
-  let newPc = cpu.get16(opOne)
-  echod("PC: 0x$1 -> 0x$2" % [cpu.pc.toHex(), newPc.toHex()])
-  cpu.pc = newPc
-
-proc execInc(cpu: CPU, opc: Opcode) =
-  let reg = parseOperand(cpu, opc.operandOne)
-  if not reg.word:
-    let value = cpu.get8(reg)
-    let newValue = value+1
-    cpu.set(reg, newValue)
-
-    # Check for half carry.
-    let halfCarry = (((value and 0xF) + (1'u8 and 0xF)) and 0x10) == 0x10
-    let zero = newValue == 0
-    let flags = registerF(cpu)
-    let flagsValue = cpu.get8(flags)
-    cpu.set(flags, flagsValue.changeFlags(z = >>zero, n=FUnset, h = >>halfCarry))
-  else:
-    # Flags are not affected for 16bit INC.
-    let value = cpu.get16(reg)
-    cpu.set(reg, value+1)
-
-proc execDec(cpu: CPU, opc: Opcode) =
-  let reg = parseOperand(cpu, opc.operandOne)
-  if not reg.word:
-    let value = cpu.get8(reg)
-    let newValue = value-1
-    cpu.set(reg, newValue)
-
-    # Check for half carry.
-    let halfCarry = (((value and 0xF) - (1'u8 and 0xF)) and 0x10) == 0x10
-    let zero = newValue == 0
-    let flags = registerF(cpu)
-    let flagsValue = cpu.get8(flags)
-    cpu.set(flags, flagsValue.changeFlags(z = >>zero, n=FSet, h = >>halfCarry))
-  else:
-    # Flags are not affected for 16bit INC.
-    let value = cpu.get16(reg)
-    cpu.set(reg, value-1)
-
 proc execCallLoc(cpu: CPU, location: uint16) =
   # Push PC onto Stack.
   cpu.sp.dec
@@ -326,117 +81,6 @@ proc execCallLoc(cpu: CPU, location: uint16) =
   cpu.mem.write8(cpu.sp, uint8((cpu.pc shl 8) shr 8))
 
   cpu.pc = location
-
-proc execCall(cpu: CPU, opc: Opcode) =
-  let location = parseOperand(cpu, opc.operandOne)
-
-  execCallLoc(cpu, cpu.get16(location))
-
-proc execPush(cpu: CPU, opc: Opcode) =
-  let valueOp = parseOperand(cpu, opc.operandOne)
-  let value = cpu.get16(valueOp)
-
-  cpu.sp.dec
-  cpu.mem.write8(cpu.sp, uint8(value shr 8))
-  cpu.sp.dec
-  cpu.mem.write8(cpu.sp, uint8((value shl 8) shr 8))
-
-proc execPop(cpu: CPU, opc: Opcode) =
-  let reg = parseOperand(cpu, opc.operandOne)
-
-  let low = cpu.mem.read8(cpu.sp)
-  cpu.sp.inc
-  let high = cpu.mem.read8(cpu.sp)
-  cpu.sp.inc
-
-  cpu.set(reg, (uint16(high) shl 8) or uint16(low))
-
-
-
-# ---- Prefix CB opcodes follow.
-
-proc execBit(cpu: CPU, opc: Opcode) =
-  let (bitNum, src) = parseOperands(cpu, opc)
-  assert bitNum.kind == IntLit
-
-  # TODO: This may be wrong.
-  let srcVal = cpu.get8(src)
-  let zero = (srcVal and (1.uint8 shl bitNum.num)) == 0
-  let flags = registerF(cpu)
-  let flagsValue = cpu.get8(flags)
-  cpu.set(flags, flagsValue.changeFlags(>>zero, FUnset, FSet))
-
-proc execRL(cpu: CPU, opc: Opcode) =
-  let reg =
-    if opc.mnemonic == "RLA": cpu.parseOperand("A")
-    else: parseOperand(cpu, opc.operandOne)
-
-  var value = cpu.get8(reg)
-  let bit7Set = (value and 0x80) == 0x80
-  value = value shl 1
-
-  let flags = cpu.get8(registerF(cpu))
-  if flags.isFlagSet(BitC):
-    value = value or 1
-  else:
-    value = value and (not 1'u8)
-
-  cpu.set(reg, value)
-
-  var z = >>(value == 0)
-  if opc.mnemonic == "RLA": z = FUnchanged
-
-  cpu.set(registerF(cpu),
-      flags.changeFlags(z = z, n = FUnset,
-                        h = FUnset, c = >>bit7Set))
-
-proc parseMnemonic(cpu: CPU, opc: Opcode)
-proc execPrefix(cpu: CPU, opc: Opcode) =
-  let prevFlags = cpu.f
-  let prefixOpc = prefixOpcs[cpu.mem.read8(cpu.pc)]
-  parseMnemonic(cpu, prefixOpc)
-  verifyFlags(cpu, prefixOpc, prevFlags)
-
-proc parseMnemonic(cpu: CPU, opc: Opcode) =
-  cpu.pc.inc
-  case opc.mnemonic
-  of "NOP":
-    nil
-  of "LD", "LDH":
-    execLoad(cpu, opc)
-  of "XOR":
-    execXOR(cpu, opc)
-  of "PREFIX":
-    execPrefix(cpu, opc)
-  of "JR":
-    execJr(cpu, opc)
-  of "JP":
-    execJp(cpu, opc)
-  of "INC":
-    execInc(cpu, opc)
-  of "DEC":
-    execDec(cpu, opc)
-  of "CALL":
-    execCall(cpu, opc)
-  of "PUSH":
-    execPush(cpu, opc)
-  of "POP":
-    execPop(cpu, opc)
-  of "RET":
-    nil
-    #execRet(cpu, opc)
-  of "CP", "SUB":
-    nil
-    #execSubCp(cpu, opc)
-  of "BIT": # Prefix CB's start here
-    execBit(cpu, opc)
-  of "RL", "RLA":
-    execRL(cpu, opc)
-  else:
-    assert false, "Unknown opcode type: " & opc.mnemonic
-
-  if cpu.clock == 0 and opc.cycles == opc.idleCycles:
-    cpu.clock.inc opc.cycles
 
 proc handleInterrupts(cpu: CPU) =
   if not cpu.ime: return
@@ -656,8 +300,6 @@ proc createGet16(operand: Operand): NimNode =
 
   assert(operand.word, operand.name)
 
-  var tempIdent = newIdentNode("temp")
-
   case operand.kind
   of Immediate:
     # let temp = cpu.mem.read16(cpu.pc)
@@ -763,11 +405,6 @@ proc createAdd(x, y: Operand): NimNode {.compileTime.} =
         uint16(cast[int8](`data`) + `pc`.int64)
     else:
       result = quote do: `data`.uint16 + `pc`
-
-proc createChangeFlags(z = FUnchanged, n = FUnchanged,
-                      h = FUnchanged, c = FUnchanged): NimNode {.compileTime.} =
-  result = quote do:
-    cpu.f = cpu.f.changeFlags(z, n, h, c)
 
 proc createPcInc(operand: Operand): NimNode {.compileTime.} =
   case operand.kind
@@ -1073,7 +710,7 @@ macro genOpcodeLogic(): stmt =
 
   result.add(newNimNode(nnkElse).add(parseExpr("assert false, opcodeAddr.toHex()")))
 
-  echo(result.toStrLit())
+  #echo(result.toStrLit())
 
 proc saveRegisters(cpu: CPU): tuple[pc, sp: uint16, a, b, c, d,
     e, f, h, l: uint8] =
