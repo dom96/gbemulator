@@ -52,26 +52,28 @@ proc newCPU(mem: Memory): CPU =
   result.ime = true
 
 proc verifyFlags(cpu: CPU, opc: Opcode, prevFlags: uint8) =
+  template assertInfo(cond: expr) =
+    assert cond, opc.mnemonic & " (0x" & opc.opcode.toHex(4) & ")"
   let flags = cpu.f
-  if opc.z == '1': assert((flags and 0b10000000) == 0b10000000)
-  elif opc.z == '0': assert((flags and 0b10000000) == 0)
-  elif opc.z == '-': assert(isFlagSet(flags, BitZ) == isFlagSet(prevFlags, BitZ))
+  if opc.z == '1': assertInfo((flags and 0b10000000) == 0b10000000)
+  elif opc.z == '0': assertInfo((flags and 0b10000000) == 0)
+  elif opc.z == '-': assertInfo(isFlagSet(flags, BitZ) == isFlagSet(prevFlags, BitZ))
 
-  if opc.n == '1': assert((flags and 0b01000000) == 0b01000000)
-  elif opc.n == '0': assert((flags and 0b01000000) == 0)
-  elif opc.n == '-': assert(isFlagSet(flags, BitN) == isFlagSet(prevFlags, BitN))
+  if opc.n == '1': assertInfo((flags and 0b01000000) == 0b01000000)
+  elif opc.n == '0': assertInfo((flags and 0b01000000) == 0)
+  elif opc.n == '-': assertInfo(isFlagSet(flags, BitN) == isFlagSet(prevFlags, BitN))
 
-  if opc.h == '1': assert((flags and 0b00100000) == 0b00100000)
-  elif opc.h == '0': assert((flags and 0b00100000) == 0)
-  elif opc.h == '-': assert(isFlagSet(flags, BitH) == isFlagSet(prevFlags, BitH))
+  if opc.h == '1': assertInfo((flags and 0b00100000) == 0b00100000)
+  elif opc.h == '0': assertInfo((flags and 0b00100000) == 0)
+  elif opc.h == '-': assertInfo(isFlagSet(flags, BitH) == isFlagSet(prevFlags, BitH))
 
-  if opc.c == '1': assert((flags and 0b00010000) == 0b00010000)
-  elif opc.c == '0': assert((flags and 0b00010000) == 0)
-  elif opc.c == '-': assert(isFlagSet(flags, BitC) == isFlagSet(prevFlags, BitC))
+  if opc.c == '1': assertInfo((flags and 0b00010000) == 0b00010000)
+  elif opc.c == '0': assertInfo((flags and 0b00010000) == 0)
+  elif opc.c == '-': assertInfo(isFlagSet(flags, BitC) == isFlagSet(prevFlags, BitC))
 
   # Also verify clock.
-  assert(cpu.clock != 0)
-  assert(cpu.clock == opc.cycles or cpu.clock == opc.idleCycles)
+  assertInfo(cpu.clock != 0)
+  assertInfo(cpu.clock == opc.cycles or cpu.clock == opc.idleCycles)
 
 proc execCallLoc(cpu: CPU, location: uint16) =
   # Push PC onto Stack.
@@ -422,7 +424,7 @@ proc createPcInc(operand: Operand): NimNode {.compileTime.} =
 template genGeneric(name, body, opcodeList: expr,
                     contents: stmt): stmt {.immediate.} =
   for opc {.inject.} in opcodeList:
-    if opc.mnemonic in name:# and opc.opcode in {0xC3, 0x06, 0x0C, 0xCD}:
+    if opc.mnemonic in name:# and opc.opcode in {0x3F}:
       var ofBranch = newNimNode(nnkOfBranch)
       ofBranch.add newIntLitNode(opc.opcode)
 
@@ -448,6 +450,10 @@ template genGeneric(name, body, opcodeList: expr,
       ofBranch.add body
       result.add ofBranch
 
+proc genNop(result: NimNode) {.compileTime.} =
+  genGeneric(["NOP"], body, opcs):
+    discard # Do nothing
+
 proc genLoad(result: NimNode) {.compileTime.} =
   genGeneric(["LD", "LDH"], body, opcs):
     var word = false
@@ -471,7 +477,8 @@ proc genXor(result: NimNode) {.compileTime.} =
     body.add quote do:
       cpu.a = cpu.a xor `src`
 
-      cpu.f = cpu.f.changeFlags(z = >>(cpu.a == 0))
+      cpu.f = cpu.f.changeFlags(z = >>(cpu.a == 0), n = FUnset,
+          c = FUnset, h = FUnset)
 
 proc genJr(result: NimNode) {.compileTime.} =
   genGeneric(["JR"], body, opcs):
@@ -491,6 +498,9 @@ proc genJr(result: NimNode) {.compileTime.} =
       body.add quote do:
         cpu.pc = `addition`
 
+    # Apparently "The assembler automatically adjusts for the twice
+    # incremented PC."
+
 proc genJp(result: NimNode) {.compileTime.} =
   genGeneric(["JP"], body, opcs):
     if operandTwo == nil:
@@ -508,6 +518,10 @@ proc genJp(result: NimNode) {.compileTime.} =
         else:
           cpu.clock.inc `idleCycles`
 
+    # Prevent increments of the PC for immediates.
+    operandTwo = nil
+    operandOne = nil
+
 proc genInc(result: NimNode) {.compileTime.} =
   genGeneric(["INC"], body, opcs):
     if not operandOne.word:
@@ -520,7 +534,7 @@ proc genInc(result: NimNode) {.compileTime.} =
       body.add quote do:
         # Check for half carry.
         let halfCarry = (((`reg` and 0xF) + (1'u8 and 0xF)) and 0x10) == 0x10
-        let zero = newValue == 0
+        let zero = `newValueIdent` == 0
         cpu.f = cpu.f.changeFlags(z = >>zero, n=FUnset, h = >>halfCarry)
     else:
       # Flags are not affected for 16bit INC.
@@ -543,7 +557,7 @@ proc genDec(result: NimNode) {.compileTime.} =
       body.add quote do:
         # Check for half carry.
         let halfCarry = (((`reg` and 0xF) - (1'u8 and 0xF)) and 0x10) == 0x10
-        let zero = newValue == 0
+        let zero = `newValueIdent` == 0
         cpu.f = cpu.f.changeFlags(z = >>zero, n=FSet, h = >>halfCarry)
     else:
       # Flags are not affected for 16bit DEC.
@@ -556,17 +570,29 @@ proc genDec(result: NimNode) {.compileTime.} =
 
 proc genCall(result: NimNode) {.compileTime.} =
   genGeneric(["CALL"], body, opcs):
+    let locationIdent = newIdentNode("location")
     if operandTwo.isNil:
       let location = createGet16(operandOne)
-      let locationIdent = newIdentNode("location")
       body.add quote do:
         let `locationIdent` = `location`
-      body.add createPcInc(operandOne)
-      operandOne = nil # Prevent genGeneric from increasing PC.
+      #body.add createPcInc(operandOne)
 
       body.add quote do: execCallLoc(cpu, `locationIdent`)
     else:
-      body.add quote do: assert false
+      let cond = createCond(operandOne)
+      let location = createGet16(operandTwo)
+      let cycles = newIntLitNode(opc.cycles)
+      let idleCycles = newIntLitNode(opc.idleCycles)
+      body.add quote do:
+        let `locationIdent` = `location`
+      body.add quote do:
+        if `cond`:
+          execCallLoc(cpu, `locationIdent`)
+          cpu.clock.inc `cycles`
+        else:
+          cpu.clock.inc `idleCycles`
+
+    operandOne = nil # Prevent genGeneric from increasing PC.
 
 proc genPush(result: NimNode) {.compileTime.} =
   genGeneric(["PUSH"], body, opcs):
@@ -599,10 +625,25 @@ proc genPop(result: NimNode) {.compileTime.} =
 
 proc genRet(result: NimNode) {.compileTime.} =
   genGeneric(["RET"], body, opcs):
-    let (high, low, value) = genPopGeneric(body)
+    if operandOne.isNil:
+      let (high, low, value) = genPopGeneric(body)
 
-    body.add quote do:
-      cpu.pc =  `value`
+      body.add quote do:
+        cpu.pc =  `value`
+    else:
+      let cond = createCond(operandOne)
+      let cycles = newIntLitNode(opc.cycles)
+      let idleCycles = newIntLitNode(opc.idleCycles)
+      var stackPop = newStmtList()
+      let (high, low, value) = genPopGeneric(stackPop)
+
+      body.add quote do:
+        if `cond`:
+          `stackPop`
+          cpu.pc = `value`
+          cpu.clock.inc `cycles`
+        else:
+          cpu.clock.inc `idleCycles`
 
 proc genSubCp(result: NimNode) {.compileTime.} =
   genGeneric(["SUB", "CP"], body, opcs):
@@ -621,6 +662,63 @@ proc genSubCp(result: NimNode) {.compileTime.} =
       let carry = cpu.a < `reg`
       let zero = `value` == 0
       cpu.f = cpu.f.changeFlags(z = >>zero, n=FSet, h = >>halfCarry, c = >>carry)
+
+proc genAdd(result: NimNode) {.compileTime.} =
+  genGeneric(["ADD"], body, opcs):
+    if not operandOne.word:
+      let regA = createGet8(operandOne)
+      let regB = createGet8(operandTwo)
+      let newValueIdent = newIdentNode("newValue")
+      body.add quote do:
+        let `newValueIdent` = `regA`+`regB`
+
+      body.add createSet8(operandOne, newValueIdent)
+      body.add quote do:
+        let regAValue = `regA`
+        let regBValue = `regB`
+        let halfCarry = (((regAValue and 0xF) + (regBValue and 0xF)) and 0x10) == 0x10
+        let zero = `newValueIdent` == 0
+        let carry = (regAValue.int + regBValue.int) > high(uint8).int
+        cpu.f = cpu.f.changeFlags(z = >>zero, n=FUnset,
+            h = >>halfCarry, c = >>carry)
+    else:
+      let regA = createGet16(operandOne)
+      let regB =
+        if operandTwo.word: createGet16(operandTwo)
+        else: createGet8(operandTwo)
+      let newValueIdent = newIdentNode("newValue")
+      body.add quote do:
+        let `newValueIdent` = `regA`+`regB`
+
+      body.add createSet16(operandOne, newValueIdent)
+      body.add quote do:
+        let halfCarry = (((`regA` and 0xFF) + (`regB` and 0xFF)) and 0x100) == 0x100
+        let zero = `newValueIdent` == 0
+        let carry = (`regA`.int + `regB`.int) > high(uint16).int
+        cpu.f = cpu.f.changeFlags(z = >>zero, n=FUnset,
+            h = >>halfCarry, c = >>carry)
+
+proc genCcf(result: NimNode) {.compileTime.} =
+  genGeneric(["CCF"], body, opcs):
+    body.add quote do:
+      cpu.f = cpu.f.changeFlags(h = FUnset, n = FUnset,
+          c = >>(not isFlagSet(cpu.f, BitC)))
+
+proc genAnd(result: NimNode) {.compileTime.} =
+  genGeneric(["AND"], body, opcs):
+    var reg = operandOne.createGet8()
+    body.add quote do:
+      cpu.a = cpu.a and `reg`
+      cpu.f = cpu.f.changeFlags(z = >>(cpu.a == 0), h = FSet, n = FUnset,
+          c = FUnset)
+
+proc genOr(result: NimNode) {.compileTime.} =
+  genGeneric(["OR"], body, opcs):
+    var reg = operandOne.createGet8()
+    body.add quote do:
+      cpu.a = cpu.a or `reg`
+      cpu.f = cpu.f.changeFlags(z = >>(cpu.a == 0), h = FUnset, n = FUnset,
+          c = FUnset)
 
 # --- Prefix CB opcodes start here ---
 
@@ -669,6 +767,27 @@ proc genRlRla(result: NimNode, rla = false) {.compileTime.} =
           cpu.f.changeFlags(z = `z`, n = FUnset,
                             h = FUnset, c = >>`bit7Set`)
 
+proc genSrl(result: NimNode) {.compileTime.} =
+  genGeneric(["SRL"], body, prefixOpcs):
+    let regRead = operandOne.createGet8()
+
+    let value = newIdentNode"value"
+    let bit0Set = newIdentNode"bit0Set"
+
+    body.add quote do:
+      var `value` = `regRead`
+      let `bit0Set` = (`value` and 1) == 1
+      `value` = `value` shr 1
+
+      # 7th bit is reset
+      `value` = `value` and (not 0x80'u8)
+
+    body.add createSet8(operandOne, value)
+
+    body.add quote do:
+      cpu.f = cpu.f.changeFlags(z = >>(`value` == 0), n = FUnset,
+                                h = FUnset, c = >>`bit0Set`)
+
 proc genCb(result: NimNode) {.compileTime.} =
   genGeneric(["PREFIXCB"], body, opcs):
     var cbAddrIdent = newIdentNode("cbAddr")
@@ -676,6 +795,7 @@ proc genCb(result: NimNode) {.compileTime.} =
     caseStmt.add cbAddrIdent
     genBit(caseStmt)
     genRlRla(caseStmt)
+    genSrl(caseStmt)
 
     caseStmt.add(newNimNode(nnkElse).add(
       quote do: assert false, `cbAddrIdent`.toHex()))
@@ -694,6 +814,7 @@ macro genOpcodeLogic(): stmt =
   result = newNimNode(nnkCaseStmt)
   result.add(newIdentNode("opcodeAddr"))
 
+  genNop(result)
   genLoad(result)
   genXor(result)
   genJp(result)
@@ -706,9 +827,26 @@ macro genOpcodeLogic(): stmt =
   genRet(result)
   genSubCp(result)
   genRlRla(result, true)
+  genAdd(result)
+  genCcf(result)
+  genAnd(result)
+  genOr(result)
   genCb(result)
+  result.add(
+    newNimNode(nnkOfBranch).add(newIntLitNode(0xF3),
+      quote do:
+        # DI
+        cpu.ime = false
+        cpu.clock.inc 4))
+  result.add(
+    newNimNode(nnkOfBranch).add(newIntLitNode(0xFC),
+      quote do:
+        # EI
+        cpu.ime = true
+        cpu.clock.inc 4))
 
-  result.add(newNimNode(nnkElse).add(parseExpr("assert false, opcodeAddr.toHex()")))
+  result.add(newNimNode(nnkElse).add(
+      parseExpr("assert false, opcodeAddr.toHex() & ' ' & oldReg.pc.toHex()")))
 
   #echo(result.toStrLit())
 
@@ -795,7 +933,7 @@ proc dump(cpu: CPU) =
 
 proc main() =
   var mem = newMemory()
-  mem.loadFile(getCurrentDir() / "tetris.gb", getCurrentDir() / "bios.gb")
+  mem.loadFile(getCurrentDir() / "06-ld r,r.gb", getCurrentDir() / "bios.gb")
   var cpu = newCPU(mem)
   var gpu = newGPU(mem)
 
@@ -817,8 +955,8 @@ proc main() =
     of "b", "break":
       breakpoints.add(split[1].parseHexInt().uint16)
       echo "Breakpoint at 0x", breakpoints[^1].toHex()
-    of "d", "dump":
-      dump(cpu)
+    of "d", "debug":
+      enableEchod = true
     of "c", "continue":
       var counter = 0
       var timeCounter = epochTime()
