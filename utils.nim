@@ -3,7 +3,7 @@ type
   FlagState* = enum
     FUnchanged, FSet, FUnset
 
-const enableEchod* = true
+const enableEchod* = false
 
 const
   BitZ*: uint8 = 0b10000000

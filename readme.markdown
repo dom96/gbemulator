@@ -18,6 +18,10 @@ hooked up yet it waits for that forever.
 
 The speed: current average 4,084,472 cycles per second. (in release mode)
 
+----
+
+Now we get to **0x002E** in the BIOS!
+
 ### Performance numbers
 
 These are the Clock cycles per second using bench.gb.
