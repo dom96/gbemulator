@@ -215,7 +215,7 @@ const opcs*: array[0 .. 0xFF, Opcode] = [
   (mnemonic: "RET", operandOne: "Z", operandTwo: "", len: 1, cycles: 20, idleCycles: 8, z: '-', n: '-', h: '-', c: '-', opcode: 0xC8),
   (mnemonic: "RET", operandOne: "", operandTwo: "", len: 1, cycles: 16, idleCycles: 16, z: '-', n: '-', h: '-', c: '-', opcode: 0xC9),
   (mnemonic: "JP", operandOne: "Z", operandTwo: "A16", len: 3, cycles: 16, idleCycles: 12, z: '-', n: '-', h: '-', c: '-', opcode: 0xCA),
-  (mnemonic: "PREFIX", operandOne: "CB", operandTwo: "", len: 1, cycles: 4, idleCycles: 4, z: '-', n: '-', h: '-', c: '-', opcode: 0xCB),
+  (mnemonic: "PREFIXCB", operandOne: "", operandTwo: "", len: 1, cycles: 4, idleCycles: 4, z: '-', n: '-', h: '-', c: '-', opcode: 0xCB),
   (mnemonic: "CALL", operandOne: "Z", operandTwo: "A16", len: 3, cycles: 24, idleCycles: 12, z: '-', n: '-', h: '-', c: '-', opcode: 0xCC),
   (mnemonic: "CALL", operandOne: "A16", operandTwo: "", len: 3, cycles: 24, idleCycles: 24, z: '-', n: '-', h: '-', c: '-', opcode: 0xCD),
   (mnemonic: "ADC", operandOne: "A", operandTwo: "D8", len: 2, cycles: 8, idleCycles: 8, z: 'Z', n: '0', h: 'H', c: 'C', opcode: 0xCE),
@@ -271,7 +271,7 @@ const opcs*: array[0 .. 0xFF, Opcode] = [
 
 ]
 
-let prefixOpcs*: array[0 .. 0xFF, Opcode] = [
+const prefixOpcs*: array[0 .. 0xFF, Opcode] = [
   (mnemonic: "RLC", operandOne: "B", operandTwo: "", len: 2, cycles: 8, idleCycles: 8, z: 'Z', n: '0', h: '0', c: 'C', opcode: 0x00),
   (mnemonic: "RLC", operandOne: "C", operandTwo: "", len: 2, cycles: 8, idleCycles: 8, z: 'Z', n: '0', h: '0', c: 'C', opcode: 0x01),
   (mnemonic: "RLC", operandOne: "D", operandTwo: "", len: 2, cycles: 8, idleCycles: 8, z: 'Z', n: '0', h: '0', c: 'C', opcode: 0x02),
