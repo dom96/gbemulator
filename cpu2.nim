@@ -424,7 +424,7 @@ proc createPcInc(operand: Operand): NimNode {.compileTime.} =
 template genGeneric(name, body, opcodeList: expr,
                     contents: stmt): stmt {.immediate.} =
   for opc {.inject.} in opcodeList:
-    if opc.mnemonic in name:# and opc.opcode in {0x3F}:
+    if opc.mnemonic in name:# and opc.opcode in {0xC3}:
       var ofBranch = newNimNode(nnkOfBranch)
       ofBranch.add newIntLitNode(opc.opcode)
 
@@ -518,9 +518,8 @@ proc genJp(result: NimNode) {.compileTime.} =
         else:
           cpu.clock.inc `idleCycles`
 
-    # Prevent increments of the PC for immediates.
-    operandTwo = nil
     operandOne = nil
+    operandTwo = nil
 
 proc genInc(result: NimNode) {.compileTime.} =
   genGeneric(["INC"], body, opcs):
@@ -575,7 +574,7 @@ proc genCall(result: NimNode) {.compileTime.} =
       let location = createGet16(operandOne)
       body.add quote do:
         let `locationIdent` = `location`
-      #body.add createPcInc(operandOne)
+      body.add createPcInc(operandOne)
 
       body.add quote do: execCallLoc(cpu, `locationIdent`)
     else:
@@ -583,6 +582,7 @@ proc genCall(result: NimNode) {.compileTime.} =
       let location = createGet16(operandTwo)
       let cycles = newIntLitNode(opc.cycles)
       let idleCycles = newIntLitNode(opc.idleCycles)
+      body.add createPcInc(operandOne)
       body.add quote do:
         let `locationIdent` = `location`
       body.add quote do:
@@ -798,7 +798,7 @@ proc genCb(result: NimNode) {.compileTime.} =
     genSrl(caseStmt)
 
     caseStmt.add(newNimNode(nnkElse).add(
-      quote do: assert false, `cbAddrIdent`.toHex()))
+      quote do: assert false, `cbAddrIdent`.toHex() & ' ' & oldReg.pc.toHex()))
 
     body.add quote do:
       let prevFlags = cpu.f
@@ -935,6 +935,7 @@ proc main() =
   var mem = newMemory()
   mem.loadFile(getCurrentDir() / "06-ld r,r.gb", getCurrentDir() / "bios.gb")
   var cpu = newCPU(mem)
+  cpu.pc = 0x100
   var gpu = newGPU(mem)
 
   verifyChecksum(cpu)
