@@ -3,7 +3,10 @@ type
   FlagState* = enum
     FUnchanged, FSet, FUnset
 
-var enableEchod* = false
+  DebugError* = object of Exception
+
+
+var enableEchod* = true
 
 const
   BitZ*: uint8 = 0b10000000

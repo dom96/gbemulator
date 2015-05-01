@@ -3,9 +3,11 @@ type
   Memory* = ref object
     rom: string
     mem: array[0xFFFF+1, uint8]
+    watchMem*: seq[uint16] ## For debugging
 
 proc newMemory*: Memory =
   new result
+  result.watchMem = @[]
 
 proc loadFile*(m: Memory, file, bios: string) =
   m.rom = readFile(file)
@@ -28,6 +30,8 @@ proc write8*(m: Memory, address: uint16, data: uint8) =
   m.mem[address] = data
   echod("Memory 0x$1: 0x$2 -> 0x$3" %
        [address.toHex(), old.toHex(), data.toHex()])
+  if address in m.watchMem:
+    raise newException(DebugError, "WatchMem")
 
 proc write16*(m: Memory, address: uint16, data: uint16) =
   m.mem[address] = (data shr 8).uint8

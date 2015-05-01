@@ -419,12 +419,12 @@ proc createPcInc(operand: Operand): NimNode {.compileTime.} =
     let addrOp = parseOperandCT(operand.opName)
     result = createPcInc(addrOp)
   else:
-    discard
+    result = newEmptyNode()
 
 template genGeneric(name, body, opcodeList: expr,
                     contents: stmt): stmt {.immediate.} =
   for opc {.inject.} in opcodeList:
-    if opc.mnemonic in name:# and opc.opcode in {0xC3}:
+    if opc.mnemonic in name:# and opc.opcode in {0xC4}:
       var ofBranch = newNimNode(nnkOfBranch)
       ofBranch.add newIntLitNode(opc.opcode)
 
@@ -528,13 +528,12 @@ proc genInc(result: NimNode) {.compileTime.} =
       let newValueIdent = newIdentNode("newValue")
       body.add quote do:
         let `newValueIdent` = `reg`+1
-
-      body.add createSet8(operandOne, newValueIdent)
-      body.add quote do:
         # Check for half carry.
-        let halfCarry = (((`reg` and 0xF) + (1'u8 and 0xF)) and 0x10) == 0x10
+        let halfCarry = (((`reg` and 0xF) +
+          (1'u8 and 0xF)) and 0x10) == 0x10
         let zero = `newValueIdent` == 0
         cpu.f = cpu.f.changeFlags(z = >>zero, n=FUnset, h = >>halfCarry)
+      body.add createSet8(operandOne, newValueIdent)
     else:
       # Flags are not affected for 16bit INC.
       let reg = createGet16(operandOne)
@@ -551,13 +550,13 @@ proc genDec(result: NimNode) {.compileTime.} =
       let newValueIdent = newIdentNode("newValue")
       body.add quote do:
         let `newValueIdent` = `reg`-1
-
-      body.add createSet8(operandOne, newValueIdent)
-      body.add quote do:
         # Check for half carry.
-        let halfCarry = (((`reg` and 0xF) - (1'u8 and 0xF)) and 0x10) == 0x10
+        let halfCarry = (((`reg` and 0xF) -
+           (1'u8 and 0xF)) and 0x10) == 0x10
         let zero = `newValueIdent` == 0
         cpu.f = cpu.f.changeFlags(z = >>zero, n=FSet, h = >>halfCarry)
+
+      body.add createSet8(operandOne, newValueIdent)
     else:
       # Flags are not affected for 16bit DEC.
       let reg = createGet16(operandOne)
@@ -582,9 +581,10 @@ proc genCall(result: NimNode) {.compileTime.} =
       let location = createGet16(operandTwo)
       let cycles = newIntLitNode(opc.cycles)
       let idleCycles = newIntLitNode(opc.idleCycles)
-      body.add createPcInc(operandOne)
       body.add quote do:
         let `locationIdent` = `location`
+      body.add createPcInc(operandOne)
+      body.add createPcInc(operandTwo)
       body.add quote do:
         if `cond`:
           execCallLoc(cpu, `locationIdent`)
@@ -593,6 +593,7 @@ proc genCall(result: NimNode) {.compileTime.} =
           cpu.clock.inc `idleCycles`
 
     operandOne = nil # Prevent genGeneric from increasing PC.
+    operandTwo = nil
 
 proc genPush(result: NimNode) {.compileTime.} =
   genGeneric(["PUSH"], body, opcs):
@@ -658,6 +659,8 @@ proc genSubCp(result: NimNode) {.compileTime.} =
 
     body.add quote do:
       # Check for half carry.
+      # TODO: Half carry is calculated incorrectly. ld a, 0; sub a, 88; should
+      # set the carry, but it does not. 0xc90b in 06-ld r,r.gb
       let halfCarry = (((cpu.a and 0xF) - (`reg` and 0xF)) and 0x10) == 0x10
       let carry = cpu.a < `reg`
       let zero = `value` == 0
@@ -671,9 +674,6 @@ proc genAdd(result: NimNode) {.compileTime.} =
       let newValueIdent = newIdentNode("newValue")
       body.add quote do:
         let `newValueIdent` = `regA`+`regB`
-
-      body.add createSet8(operandOne, newValueIdent)
-      body.add quote do:
         let regAValue = `regA`
         let regBValue = `regB`
         let halfCarry = (((regAValue and 0xF) + (regBValue and 0xF)) and 0x10) == 0x10
@@ -681,6 +681,7 @@ proc genAdd(result: NimNode) {.compileTime.} =
         let carry = (regAValue.int + regBValue.int) > high(uint8).int
         cpu.f = cpu.f.changeFlags(z = >>zero, n=FUnset,
             h = >>halfCarry, c = >>carry)
+      body.add createSet8(operandOne, newValueIdent)
     else:
       let regA = createGet16(operandOne)
       let regB =
@@ -689,14 +690,32 @@ proc genAdd(result: NimNode) {.compileTime.} =
       let newValueIdent = newIdentNode("newValue")
       body.add quote do:
         let `newValueIdent` = `regA`+`regB`
-
-      body.add createSet16(operandOne, newValueIdent)
-      body.add quote do:
         let halfCarry = (((`regA` and 0xFF) + (`regB` and 0xFF)) and 0x100) == 0x100
-        let zero = `newValueIdent` == 0
         let carry = (`regA`.int + `regB`.int) > high(uint16).int
-        cpu.f = cpu.f.changeFlags(z = >>zero, n=FUnset,
-            h = >>halfCarry, c = >>carry)
+        cpu.f = cpu.f.changeFlags(n=FUnset, h = >>halfCarry, c = >>carry)
+      body.add createSet16(operandOne, newValueIdent)
+
+proc genAdc(result: NimNode) {.compileTime.} =
+  genGeneric(["ADC"], body, opcs):
+    assert(not operandOne.word)
+    let regA = createGet8(operandOne)
+    let regB = createGet8(operandTwo)
+    let newValueIdent = newIdentNode("newValue")
+    let carryIdent = newIdentNode("carry")
+    body.add quote do:
+      let `carryIdent` =
+        if cpu.f.isFlagSet(BitC): 1'u8
+        else: 0'u8
+      let `newValueIdent` = `regA` + `regB` + `carryIdent`
+      let regAValue = `regA`
+      let regBValue = `regB`
+      let halfCarry = (((regAValue and 0xF) + (regBValue and 0xF) +
+          (`carryIdent` and 0xF)) and 0x10) == 0x10
+      let zero = `newValueIdent` == 0
+      let carry = (regAValue.int + regBValue.int + `carryIdent`.int) > high(uint8).int
+      cpu.f = cpu.f.changeFlags(z = >>zero, n=FUnset,
+          h = >>halfCarry, c = >>carry)
+    body.add createSet8(operandOne, newValueIdent)
 
 proc genCcf(result: NimNode) {.compileTime.} =
   genGeneric(["CCF"], body, opcs):
@@ -767,6 +786,38 @@ proc genRlRla(result: NimNode, rla = false) {.compileTime.} =
           cpu.f.changeFlags(z = `z`, n = FUnset,
                             h = FUnset, c = >>`bit7Set`)
 
+proc genRrRra(result: NimNode, rra = false) {.compileTime.} =
+  genGeneric(["RR", "RRA"], body, if rra: opcs else: prefixOpcs):
+    let reg =
+      if opc.mnemonic == "RRA": parseOperandCT("A")
+      else: operandOne
+    let regRead = reg.createGet8()
+
+    let value = newIdentNode"value"
+    let bit0set = newIdentNode"bit0set"
+
+    body.add quote do:
+      var `value` = `regRead`
+      let `bit0Set` = (`value` and 1) == 1
+      `value` = `value` shr 1
+
+      if cpu.f.isFlagSet(BitC):
+        `value` = `value` or 0x80
+
+    body.add createSet8(reg, value)
+
+    let z = newIdentNode"z"
+    if opc.mnemonic == "RRA":
+      body.add quote do:
+        var `z` = FUnchanged
+    else:
+      body.add quote do:
+        var `z` = >>(`value` == 0)
+    body.add quote do:
+      cpu.f =
+          cpu.f.changeFlags(z = `z`, n = FUnset,
+                            h = FUnset, c = >>`bit0Set`)
+
 proc genSrl(result: NimNode) {.compileTime.} =
   genGeneric(["SRL"], body, prefixOpcs):
     let regRead = operandOne.createGet8()
@@ -788,6 +839,31 @@ proc genSrl(result: NimNode) {.compileTime.} =
       cpu.f = cpu.f.changeFlags(z = >>(`value` == 0), n = FUnset,
                                 h = FUnset, c = >>`bit0Set`)
 
+proc genRlcRlca(result: NimNode, rlca = false) {.compileTime.} =
+  genGeneric(["RLC", "RLCA"], body, if rlca: opcs else: prefixOpcs):
+    let reg =
+      if opc.mnemonic == "RLCA": parseOperandCT("A")
+      else: operandOne
+    let regRead = reg.createGet8()
+
+    let value = newIdentNode"value"
+    let bit7set = newIdentNode"bit7set"
+
+    body.add quote do:
+      var `value` = `regRead`
+      let `bit7Set` = (`value` and 0x80) == 0x80
+      `value` = `value` shl 1
+
+      if `bit7Set`:
+        `value` = `value` or 1
+
+    body.add createSet8(reg, value)
+
+    body.add quote do:
+      cpu.f =
+          cpu.f.changeFlags(n = FUnset,
+                            h = FUnset, c = >>`bit7Set`)
+
 proc genCb(result: NimNode) {.compileTime.} =
   genGeneric(["PREFIXCB"], body, opcs):
     var cbAddrIdent = newIdentNode("cbAddr")
@@ -795,10 +871,13 @@ proc genCb(result: NimNode) {.compileTime.} =
     caseStmt.add cbAddrIdent
     genBit(caseStmt)
     genRlRla(caseStmt)
+    genRrRra(caseStmt)
+    genRlcRlca(caseStmt)
     genSrl(caseStmt)
 
     caseStmt.add(newNimNode(nnkElse).add(
-      quote do: assert false, `cbAddrIdent`.toHex() & ' ' & oldReg.pc.toHex()))
+      quote do:
+        assert false, "CB: " & `cbAddrIdent`.toHex() & ' ' & oldReg.pc.toHex()))
 
     body.add quote do:
       let prevFlags = cpu.f
@@ -827,7 +906,10 @@ macro genOpcodeLogic(): stmt =
   genRet(result)
   genSubCp(result)
   genRlRla(result, true)
+  genRrRra(result, true)
+  genRlcRlca(result, true)
   genAdd(result)
+  genAdc(result)
   genCcf(result)
   genAnd(result)
   genOr(result)
@@ -844,9 +926,23 @@ macro genOpcodeLogic(): stmt =
         # EI
         cpu.ime = true
         cpu.clock.inc 4))
+  result.add(
+    newNimNode(nnkOfBranch).add(newIntLitNode(0x76),
+      quote do:
+        # HALT
+        # Keep looping this instruction to wait for interrupts.
+        cpu.pc.dec
+        cpu.clock.inc 4))
+  result.add(
+    newNimNode(nnkOfBranch).add(newIntLitNode(0x10),
+      quote do:
+        # STOP
+        raise newException(DebugError, "STOP")))
+
 
   result.add(newNimNode(nnkElse).add(
-      parseExpr("assert false, opcodeAddr.toHex() & ' ' & oldReg.pc.toHex()")))
+    quote do:
+      assert false, "OPCS: " & opcodeAddr.toHex() & ' ' & oldReg.pc.toHex()))
 
   #echo(result.toStrLit())
 
@@ -920,22 +1016,41 @@ proc verifyChecksum(cpu: CPU) =
 proc dump(cpu: CPU) =
   ## For debugging info.
   var data = ""
-  for i in 0x8000 .. 0x81A0:
+  for i in 0x8300 .. 0x83E0:
     data.add(cast[char](cpu.mem.read8(i.uint16)))
 
   writeFile(getCurrentDir() / "dump8000.mem", data)
 
   data = ""
-  for i in 0x9900 .. 0x9930:
+  for i in 0x9800 .. 0x9870:
     data.add(cast[char](cpu.mem.read8(i.uint16)))
 
   writeFile(getCurrentDir() / "dump9900.mem", data)
 
+proc echoTrace(cpu: CPU) =
+  var sp = cpu.sp
+  echo("Traceback (0x", sp.toHex(), ")")
+  while sp.int+2 < high(uint16).int:
+    let low = cpu.mem.read8(sp)
+    sp.inc
+    let high = cpu.mem.read8(sp)
+    sp.inc
+    let value = (uint16(high) shl 8) or uint16(low)
+    if value == 0: break
+    let opc = opcs[cpu.mem.read8(value)]
+    echo("  SP: 0x$#. 0x$#: $# $#, $# (0x$#)" % [sp.toHex(), value.toHex(),
+        opc.mnemonic, opc.operandOne, opc.operandTwo, opc.opcode.toHex(2)])
+
+proc echoMem(cpu: CPU) =
+  for i in 0'u8 .. 5'u8:
+    echo("0x$#: 0x$#" % [(cpu.pc+i).toHex(), cpu.mem.read8(cpu.pc+i).toHex()])
+
 proc main() =
   var mem = newMemory()
-  mem.loadFile(getCurrentDir() / "06-ld r,r.gb", getCurrentDir() / "bios.gb")
+  mem.loadFile(getCurrentDir() / "tetris.gb", getCurrentDir() / "bios.gb")
   var cpu = newCPU(mem)
-  cpu.pc = 0x100
+  cpu.sp = 0xFFFE
+  #cpu.pc = 0x100
   var gpu = newGPU(mem)
 
   verifyChecksum(cpu)
@@ -952,12 +1067,21 @@ proc main() =
     case cmd.toLower()
     of "n", "next":
       cpu.next()
-      gpu.next(cpu.clock)
+      discard gpu.next(cpu.clock)
     of "b", "break":
       breakpoints.add(split[1].parseHexInt().uint16)
       echo "Breakpoint at 0x", breakpoints[^1].toHex()
+    of "bt":
+      echoTrace(cpu)
+    of "mem":
+      echoMem(cpu)
     of "d", "debug":
-      enableEchod = true
+      enableEchod = not enableEchod
+    of "dump":
+      dump(cpu)
+    of "w", "watch":
+      cpu.mem.watchMem.add(split[1].parseHexInt().uint16)
+      echo "Memory watch at 0x", cpu.mem.watchMem[^1].toHex()
     of "c", "continue":
       var counter = 0
       var timeCounter = epochTime()
@@ -968,8 +1092,13 @@ proc main() =
             if cpu.pc == brk:
               echo("Reached 0x", brk.toHex())
               break cpuLoop
-          cpu.next()
-          gpu.next(cpu.clock)
+          try:
+            cpu.next()
+          except:
+            echo(getStackTrace())
+            echo(getCurrentExceptionMsg())
+            break cpuLoop
+          if gpu.next(cpu.clock): break cpuLoop
           counter.inc cpu.clock
           if epochTime() - timeCounter >= 1.0:
             writeFile(getCurrentDir() / "ips.txt", $counter)

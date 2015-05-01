@@ -136,7 +136,7 @@ proc renderAll(gpu: GPU) =
   let scrollX = gpu.mem.read8(0xFF43)
   gpu.surface.drawRect((scrollX.int, scrollY.int, 160, 144), colRed)
 
-proc next*(gpu: GPU, clock: int) =
+proc next*(gpu: GPU, clock: int): bool =
 
   gpu.clock.inc clock
 
@@ -191,7 +191,7 @@ proc next*(gpu: GPU, clock: int) =
     of sdl.KEYDOWN:
       var evk = sdl.evKeyboard(addr event)
       if evk.keysym.sym == sdl.K_SPACE:
-        gpu.surface.drawText((400, 5), "Space")
+        return true
       else:
         echo(evk.keysym.sym)
     else:

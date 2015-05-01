@@ -22,7 +22,7 @@ The speed: current average 4,084,472 cycles per second. (in release mode)
 
 <del>Now we get to **0x002E** in the BIOS!</del>
 
-Now we finish the BIOS and get to 0xC220 in the 06-ld r,r CPU test.
+Now we finish the BIOS and get to <del>0xC81b</del> 0xC0AA in the 06-ld r,r CPU test.
 
 ### Performance numbers
 
