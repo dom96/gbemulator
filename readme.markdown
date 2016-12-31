@@ -81,4 +81,4 @@ https://slashbinbash.wordpress.com/2013/02/07/gameboy-tile-mapping-between-image
 
 GB Test ROMs - http://blargg.8bitalley.com/parodius/gb-tests/
 
-https://www.youtube.com/watch?v=HyzD8pNlpwI
+https://www.youtube.com/watch?v=HyzD8pNlpwI - https://news.ycombinator.com/item?id=13290362
