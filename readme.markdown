@@ -80,3 +80,5 @@ http://blog.kevtris.org/blogfiles/Nitty%20Gritty%20Gameboy%20VRAM%20Timing.txt
 https://slashbinbash.wordpress.com/2013/02/07/gameboy-tile-mapping-between-image-and-memory/
 
 GB Test ROMs - http://blargg.8bitalley.com/parodius/gb-tests/
+
+https://www.youtube.com/watch?v=HyzD8pNlpwI
